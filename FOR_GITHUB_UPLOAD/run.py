@@ -19,7 +19,7 @@ def get_lan_ip() -> str:
 
 def main():
     lan_ip = get_lan_ip()
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8000))
     network_url = f"http://{lan_ip}:{port}"
     local_url = f"http://localhost:{port}"
 
