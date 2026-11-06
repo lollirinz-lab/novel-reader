@@ -1,0 +1,11 @@
+venv/
+audio_cache/
+__pycache__/
+*.pyc
+.DS_Store
+Novel_Reader_Cloud.zip
+uploads/*.pdf
+uploads/*.epub
+uploads/*.txt
+uploads/*.docx
+uploads/novel_*.json
