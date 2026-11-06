@@ -385,6 +385,38 @@ async def prefetch_tts(req: PrefetchRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(run_prefetch)
     return {"status": "prefetching", "count": min(len(req.paragraphs), 5)}
 
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    total_files = 0
+    total_bytes = 0
+    if AUDIO_CACHE_DIR.exists():
+        for p in AUDIO_CACHE_DIR.glob("*.mp3"):
+            try:
+                total_bytes += p.stat().st_size
+                total_files += 1
+            except Exception:
+                pass
+    size_mb = round(total_bytes / (1024 * 1024), 2)
+    return {"files": total_files, "bytes": total_bytes, "size_mb": size_mb}
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    deleted = 0
+    freed_bytes = 0
+    if AUDIO_CACHE_DIR.exists():
+        for p in AUDIO_CACHE_DIR.glob("*.mp3"):
+            try:
+                freed_bytes += p.stat().st_size
+                p.unlink()
+                deleted += 1
+            except Exception:
+                pass
+    return {
+        "status": "cleared",
+        "deleted_files": deleted,
+        "freed_mb": round(freed_bytes / (1024 * 1024), 2)
+    }
+
 # Mount static folder
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

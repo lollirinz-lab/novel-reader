@@ -83,6 +83,8 @@ class NovelReaderApp {
     this.chapterListContainer = document.getElementById('chapter-list-container');
     this.selectVoice = document.getElementById('select-voice');
     this.pwaBanner = document.getElementById('install-banner');
+    this.cacheSizeText = document.getElementById('cache-size-text');
+    this.btnClearCache = document.getElementById('btn-clear-cache');
   }
 
   async fetchInfo() {
@@ -715,6 +717,38 @@ class NovelReaderApp {
     });
   }
 
+  async updateCacheStats() {
+    if (!this.cacheSizeText) return;
+    try {
+      const res = await fetch('/api/cache/stats');
+      if (res.ok) {
+        const data = await res.json();
+        this.cacheSizeText.textContent = `${data.size_mb} MB (${data.files} ไฟล์)`;
+      }
+    } catch (e) {
+      this.cacheSizeText.textContent = 'ไม่สามารถดึงข้อมูลได้';
+    }
+  }
+
+  async clearServerCache() {
+    if (!confirm('ต้องการล้างไฟล์เสียงแคชทั้งหมดหรือไม่? (เพื่อคืนพื้นที่ความจำให้เครื่อง)')) {
+      return;
+    }
+    try {
+      this.cacheSizeText.textContent = 'กำลังล้างแคช...';
+      const res = await fetch('/api/cache/clear', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        this.clearBlobCache();
+        alert(`ล้างแคชเรียบร้อยแล้วค่ะ! คืนพื้นที่ได้ ${data.freed_mb} MB (${data.deleted_files} ไฟล์)`);
+        this.updateCacheStats();
+      }
+    } catch (e) {
+      alert('เกิดข้อผิดพลาดในการล้างแคช: ' + e.message);
+      this.updateCacheStats();
+    }
+  }
+
   setupEventListeners() {
     // Navigation
     this.btnBack.addEventListener('click', () => {
@@ -732,7 +766,12 @@ class NovelReaderApp {
 
     this.btnSettings.addEventListener('click', () => {
       this.showModal(this.modalSettings);
+      this.updateCacheStats();
     });
+
+    if (this.btnClearCache) {
+      this.btnClearCache.addEventListener('click', () => this.clearServerCache());
+    }
 
     this.btnChapters.addEventListener('click', () => {
       this.openChaptersModal();
