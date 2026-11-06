@@ -220,7 +220,14 @@ class NovelReaderApp {
   renderParagraphs() {
     this.readerContentBox.innerHTML = '';
     if (this.paragraphs.length === 0) {
-      this.readerContentBox.innerHTML = '<p style="text-align:center; color:var(--text-muted);">ไม่มีเนื้อหาในตอนนี้</p>';
+      this.readerContentBox.innerHTML = `
+        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+          <div style="font-size: 2.5rem; margin-bottom: 8px;">⚠️</div>
+          <p style="font-family: var(--font-title); font-size: 1.1rem; font-weight: 600;">ไม่พบเนื้อหาข้อความในตอนนี้</p>
+          <p style="font-size: 0.85rem; margin-top: 4px;">ไฟล์นี้อาจเป็นรูปภาพสแกน ไม่มีตัวหนังสือให้อ่านค่ะ</p>
+          <button class="btn-pill" onclick="window.app.btnBack.click()" style="margin-top: 16px;">‹ กลับหน้ารายการ</button>
+        </div>
+      `;
       return;
     }
 
@@ -332,10 +339,8 @@ class NovelReaderApp {
       this.updateMediaSession();
       this.saveCurrentBookmark();
 
-      // Preload next 3 paragraphs into memory blobs
+      // Preload next paragraph into memory blob
       this.preloadBlob(this.currentParagraphIdx + 1);
-      this.preloadBlob(this.currentParagraphIdx + 2);
-      this.preloadBlob(this.currentParagraphIdx + 3);
 
       // Server-side prefetch
       this.prefetchNext();

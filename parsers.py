@@ -207,7 +207,10 @@ def parse_pdf(file_path: str) -> Dict[str, Any]:
         if t:
             pages_text.append(clean_text(t))
             
-    full_text = '\n\n'.join(pages_text)
+    full_text = '\n\n'.join(pages_text).strip()
+    if len(full_text) < 50:
+        raise ValueError("ไฟล์ PDF นี้เป็นรูปภาพสแกน (ไม่มีข้อความตัวอักษรให้อ่าน) กรุณาใช้ไฟล์ PDF ที่เป็นตัวอักษร, .EPUB, .TXT หรือ .DOCX ค่ะ")
+        
     chapters = detect_chapters_from_text(full_text, default_title=title)
     
     return {
