@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#grad)" />
+  <g filter="url(#shadow)" fill="#ffffff">
+    <!-- Open Book -->
+    <path d="M128 160 C 180 140, 230 150, 256 180 C 282 150, 332 140, 384 160 L 384 340 C 332 320, 282 330, 256 360 C 230 330, 180 320, 128 340 Z" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="256" y1="180" x2="256" y2="360" stroke="#ffffff" stroke-width="24" stroke-linecap="round" />
+    <!-- Audio Wave / Headphones overlay -->
+    <path d="M 210 240 Q 256 210 302 240" fill="none" stroke="#fbcfe8" stroke-width="14" stroke-linecap="round"/>
+    <path d="M 180 275 Q 256 220 332 275" fill="none" stroke="#fbcfe8" stroke-width="14" stroke-linecap="round"/>
+    <circle cx="256" cy="290" r="14" fill="#ffffff" />
+  </g>
+</svg>

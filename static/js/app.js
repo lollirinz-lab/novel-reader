@@ -1,4 +1,4 @@
-// Novel Reader PWA - Frontend Application Logic with Dual-Audio Gapless Engine
+// Novel Reader PWA - Frontend Application Logic with In-Memory Blob Preloading & Auto-Recovery
 class NovelReaderApp {
   constructor() {
     this.novels = [];
@@ -8,11 +8,14 @@ class NovelReaderApp {
     this.paragraphs = [];
     this.isPlaying = false;
 
-    // Dual Audio Engine for Seamless Gapless Playback (Zero Gap between paragraphs)
-    this.audioA = new Audio();
-    this.audioB = new Audio();
-    this.currentAudio = this.audioA;
-    this.nextAudio = this.audioB;
+    // Single persistent audio player (100% compliant with iOS Safari & Android background playback)
+    this.audio = new Audio();
+    this.audio.preload = 'auto';
+    
+    // In-memory audio Blob cache (pre-downloads next paragraphs in RAM for 0ms latency)
+    this.blobCache = new Map();
+    this.loadingBlobs = new Set();
+    this.watchdogTimer = null;
     this.networkInfo = null;
     
     // User preferences
@@ -193,6 +196,9 @@ class NovelReaderApp {
       this.paragraphs = this.currentChapter.paragraphs || [];
       this.currentParagraphIdx = startParaIdx;
 
+      // Clear memory blob cache for new chapter
+      this.clearBlobCache();
+
       this.readerChapterTitle.textContent = this.currentChapter.title;
       this.renderParagraphs();
       this.updatePlayerInfo();
@@ -200,9 +206,11 @@ class NovelReaderApp {
       // Save bookmark
       this.saveCurrentBookmark();
 
-      // Preload first and second paragraphs
+      // Preload first batch into memory blobs
       if (this.paragraphs.length > 0) {
-        this.preloadFirstParagraphs(this.currentParagraphIdx);
+        this.preloadBlob(this.currentParagraphIdx);
+        this.preloadBlob(this.currentParagraphIdx + 1);
+        this.preloadBlob(this.currentParagraphIdx + 2);
       }
     } catch (e) {
       this.readerContentBox.innerHTML = `<p style="color:red; text-align:center;">เกิดข้อผิดพลาด: ${e.message}</p>`;
@@ -262,27 +270,42 @@ class NovelReaderApp {
     return `/api/tts?${params.toString()}`;
   }
 
-  preloadFirstParagraphs(idx) {
-    if (idx < this.paragraphs.length) {
-      this.currentAudio.src = this.getAudioUrl(this.paragraphs[idx]);
-      this.currentAudio.playbackRate = this.speed;
-      this.currentAudio.preload = 'auto';
-    }
-    if (idx + 1 < this.paragraphs.length) {
-      this.preloadNext(idx + 1);
+  // Preload audio directly into in-memory Blob URL for instantaneous playback
+  async preloadBlob(idx) {
+    if (idx < 0 || idx >= this.paragraphs.length) return;
+    const text = this.paragraphs[idx];
+    const rawUrl = this.getAudioUrl(text);
+
+    if (this.blobCache.has(rawUrl) || this.loadingBlobs.has(rawUrl)) return;
+    this.loadingBlobs.add(rawUrl);
+
+    try {
+      const res = await fetch(rawUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        this.blobCache.set(rawUrl, blobUrl);
+
+        // Keep blob cache bounded (max 25 blobs to save mobile memory)
+        if (this.blobCache.size > 25) {
+          const oldestKey = this.blobCache.keys().next().value;
+          URL.revokeObjectURL(this.blobCache.get(oldestKey));
+          this.blobCache.delete(oldestKey);
+        }
+      }
+    } catch (e) {
+      console.warn('Blob preload failed, will stream directly', e);
+    } finally {
+      this.loadingBlobs.delete(rawUrl);
     }
   }
 
-  preloadNext(nextIdx) {
-    if (nextIdx < this.paragraphs.length) {
-      const url = this.getAudioUrl(this.paragraphs[nextIdx]);
-      if (this.nextAudio.src !== url) {
-        this.nextAudio.src = url;
-        this.nextAudio.playbackRate = this.speed;
-        this.nextAudio.preload = 'auto';
-        this.nextAudio.load();
-      }
+  clearBlobCache() {
+    for (const bUrl of this.blobCache.values()) {
+      URL.revokeObjectURL(bUrl);
     }
+    this.blobCache.clear();
+    this.loadingBlobs.clear();
   }
 
   async playCurrentParagraph() {
@@ -292,60 +315,74 @@ class NovelReaderApp {
     }
 
     const text = this.paragraphs[this.currentParagraphIdx];
-    const audioUrl = this.getAudioUrl(text);
+    const rawUrl = this.getAudioUrl(text);
+    const audioSrc = this.blobCache.get(rawUrl) || rawUrl;
 
-    // If currentAudio isn't pointed to this url yet, set it
-    if (!this.currentAudio.src.includes(encodeURIComponent(text.substring(0, 20)))) {
-      this.currentAudio.src = audioUrl;
-    }
-    this.currentAudio.playbackRate = this.speed;
+    // Reset stall watchdog
+    this.resetWatchdog();
+
+    this.audio.src = audioSrc;
+    this.audio.playbackRate = this.speed;
 
     try {
-      await this.currentAudio.play();
+      await this.audio.play();
       this.isPlaying = true;
       this.updatePlayBtnState();
       this.highlightActiveParagraph();
       this.updateMediaSession();
       this.saveCurrentBookmark();
 
-      // Seamless buffer: preload next paragraph in background immediately
-      this.preloadNext(this.currentParagraphIdx + 1);
+      // Preload next 3 paragraphs into memory blobs
+      this.preloadBlob(this.currentParagraphIdx + 1);
+      this.preloadBlob(this.currentParagraphIdx + 2);
+      this.preloadBlob(this.currentParagraphIdx + 3);
 
-      // Server-side prefetch for subsequent 5 paragraphs
+      // Server-side prefetch
       this.prefetchNext();
     } catch (e) {
-      console.warn('Playback error or browser autoplay policy:', e);
+      console.warn('Playback error or autoplay blocked:', e);
+      // If error, trigger recovery watchdog
+      this.scheduleRecovery(1500);
     }
   }
 
   handleAudioEnded() {
+    this.clearWatchdog();
     if (!this.isPlaying) return;
 
     if (this.currentParagraphIdx + 1 < this.paragraphs.length) {
       this.currentParagraphIdx++;
-
-      // Swap audio players for 0ms GAPLESS playback!
-      const finished = this.currentAudio;
-      this.currentAudio = this.nextAudio;
-      this.nextAudio = finished;
-
-      // Play preloaded audio immediately (instant transition)
-      this.currentAudio.playbackRate = this.speed;
-      this.currentAudio.play().then(() => {
-        this.highlightActiveParagraph();
-        this.updateMediaSession();
-        this.saveCurrentBookmark();
-        // Immediately load the upcoming paragraph on the other player
-        this.preloadNext(this.currentParagraphIdx + 1);
-      }).catch(err => {
-        // Fallback reload if browser dropped preloaded buffer
-        this.playCurrentParagraph();
-      });
-
-      this.prefetchNext();
+      this.playCurrentParagraph();
     } else {
       this.onChapterEnded();
     }
+  }
+
+  // Anti-Freeze Watchdog: if audio stalls or goes silent for too long, automatically recover
+  resetWatchdog() {
+    this.clearWatchdog();
+    this.watchdogTimer = setTimeout(() => {
+      if (this.isPlaying && (this.audio.paused || this.audio.readyState < 2)) {
+        console.warn('Stall detected by watchdog! Auto-recovering playback...');
+        this.handleAudioEnded();
+      }
+    }, 4500);
+  }
+
+  clearWatchdog() {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  scheduleRecovery(ms = 2000) {
+    setTimeout(() => {
+      if (this.isPlaying && this.audio.paused) {
+        console.warn('Auto-recovering stalled audio...');
+        this.handleAudioEnded();
+      }
+    }, ms);
   }
 
   prefetchNext() {
@@ -370,17 +407,18 @@ class NovelReaderApp {
 
   togglePlay() {
     if (this.isPlaying) {
-      this.currentAudio.pause();
+      this.audio.pause();
       this.isPlaying = false;
+      this.clearWatchdog();
       this.updatePlayBtnState();
     } else {
-      if (!this.currentAudio.src || this.currentAudio.src === '' || this.currentAudio.ended) {
+      if (!this.audio.src || this.audio.src === '' || this.audio.ended) {
         this.playCurrentParagraph();
       } else {
-        this.currentAudio.play().then(() => {
+        this.audio.play().then(() => {
           this.isPlaying = true;
           this.updatePlayBtnState();
-          this.preloadNext(this.currentParagraphIdx + 1);
+          this.preloadBlob(this.currentParagraphIdx + 1);
         }).catch(err => {
           this.playCurrentParagraph();
         });
@@ -397,31 +435,38 @@ class NovelReaderApp {
   }
 
   setupAudioEvents() {
-    // Bind listeners to BOTH players
-    [this.audioA, this.audioB].forEach(player => {
-      player.addEventListener('ended', () => {
-        if (player === this.currentAudio) {
-          this.handleAudioEnded();
-        }
-      });
+    this.audio.addEventListener('ended', () => {
+      this.handleAudioEnded();
+    });
 
-      player.addEventListener('timeupdate', () => {
-        if (player === this.currentAudio && player.duration && this.paragraphs.length > 0) {
-          const paraBase = (this.currentParagraphIdx / this.paragraphs.length) * 100;
-          const paraProgress = (player.currentTime / player.duration) * (100 / this.paragraphs.length);
-          this.playerProgressBar.style.width = `${paraBase + paraProgress}%`;
-        }
-      });
+    this.audio.addEventListener('playing', () => {
+      this.clearWatchdog();
+    });
 
-      player.addEventListener('error', (e) => {
-        if (player === this.currentAudio) {
-          console.warn('Current audio stream error, advancing or retrying...', e);
-        }
-      });
+    this.audio.addEventListener('waiting', () => {
+      this.resetWatchdog();
+    });
+
+    this.audio.addEventListener('stalled', () => {
+      this.resetWatchdog();
+    });
+
+    this.audio.addEventListener('error', (e) => {
+      console.warn('Audio element error detected, skipping to next paragraph in 500ms...', e);
+      this.scheduleRecovery(500);
+    });
+
+    this.audio.addEventListener('timeupdate', () => {
+      if (this.audio.duration && this.paragraphs.length > 0) {
+        const paraBase = (this.currentParagraphIdx / this.paragraphs.length) * 100;
+        const paraProgress = (this.audio.currentTime / this.audio.duration) * (100 / this.paragraphs.length);
+        this.playerProgressBar.style.width = `${paraBase + paraProgress}%`;
+      }
     });
   }
 
   onChapterEnded() {
+    this.clearWatchdog();
     if (this.sleepTimer === 'chapter') {
       this.stopPlayback('ครบตามเวลาที่ตั้งไว้ (จบตอน)');
       return;
@@ -489,16 +534,16 @@ class NovelReaderApp {
   }
 
   rewind15() {
-    if (this.currentAudio.currentTime > 5) {
-      this.currentAudio.currentTime = Math.max(0, this.currentAudio.currentTime - 15);
+    if (this.audio.currentTime > 5) {
+      this.audio.currentTime = Math.max(0, this.audio.currentTime - 15);
     } else {
       this.prevParagraph();
     }
   }
 
   forward15() {
-    if (this.currentAudio.duration && this.currentAudio.currentTime + 15 < this.currentAudio.duration) {
-      this.currentAudio.currentTime += 15;
+    if (this.audio.duration && this.audio.currentTime + 15 < this.audio.duration) {
+      this.audio.currentTime += 15;
     } else {
       this.nextParagraph();
     }
@@ -532,8 +577,7 @@ class NovelReaderApp {
   setSpeed(speedVal) {
     this.speed = speedVal;
     localStorage.setItem('novel_speed', speedVal);
-    this.currentAudio.playbackRate = speedVal;
-    this.nextAudio.playbackRate = speedVal;
+    this.audio.playbackRate = speedVal;
     this.btnSpeed.textContent = `${speedVal}x`;
   }
 
@@ -579,8 +623,9 @@ class NovelReaderApp {
   }
 
   stopPlayback(msg) {
-    this.currentAudio.pause();
+    this.audio.pause();
     this.isPlaying = false;
+    this.clearWatchdog();
     this.updatePlayBtnState();
     if (msg) alert(msg);
   }
@@ -749,6 +794,7 @@ class NovelReaderApp {
     this.selectVoice.addEventListener('change', (e) => {
       this.voice = e.target.value;
       localStorage.setItem('novel_voice', this.voice);
+      this.clearBlobCache();
       if (this.isPlaying) {
         this.playCurrentParagraph(); // re-generate with new voice
       }

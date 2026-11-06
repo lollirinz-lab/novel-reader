@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>เสียงหวานนิยาย - PWA Audio Novel Reader</title>
+
+  <!-- PWA & Mobile Meta Tags -->
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#8b5cf6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="เสียงหวาน">
+  <link rel="apple-touch-icon" href="/static/icons/icon.svg">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
+
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="theme-sepia">
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button id="btn-back" class="btn-icon" style="display: none;" title="กลับหน้ารายการ">
+        ‹
+      </button>
+      <div class="brand" onclick="location.reload()">
+        <img src="/static/icons/icon.svg" alt="Logo" class="brand-icon">
+        <div class="brand-text">
+          <h1>เสียงหวานนิยาย</h1>
+          <p>พากย์เสียงนุ่มละมุน • ลื่นหูเหมือนคนจริง</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button id="btn-chapters" class="btn-icon" style="display: none;" title="สารบัญตอน">
+        📑
+      </button>
+      <button id="btn-mobile" class="btn-pill" title="เปิดบน iPhone/Android">
+        📱 บนมือถือ
+      </button>
+      <button id="btn-settings" class="btn-icon" title="ตั้งค่าเสียงและหน้าตา">
+        ⚙️
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="container">
+
+    <!-- PWA Install Tip Banner -->
+    <div id="install-banner" class="install-banner" style="display: none;">
+      <div class="install-text">
+        <strong>ติดตั้งแอปลงในมือถือ</strong>
+        <span>ฟังนิยายได้เต็มจอ ควบคุมผ่าน Lock Screen สบายตา</span>
+      </div>
+      <button id="btn-install-pwa" class="btn-install">ติดตั้งเลย</button>
+    </div>
+
+    <!-- VIEW 1: Novel Library -->
+    <section id="view-library" class="view active">
+      
+      <!-- Upload Card -->
+      <div id="upload-card" class="upload-card">
+        <div class="upload-icon">📥</div>
+        <div class="upload-title">แตะหรือลากไฟล์นิยายมาวางที่นี่</div>
+        <div class="upload-subtitle">ระบบจะแยกบท จัดย่อหน้า และสร้างเสียงพากย์นุ่มนวลให้อัตโนมัติ</div>
+        <div class="upload-badges">
+          <span class="badge">.EPUB</span>
+          <span class="badge">.PDF</span>
+          <span class="badge">.TXT</span>
+          <span class="badge">.DOCX / .DOC</span>
+        </div>
+        <input type="file" id="file-upload-input" accept=".epub,.pdf,.txt,.docx,.doc,.md" style="display: none;">
+      </div>
+
+      <!-- Novels Grid -->
+      <div class="section-header">
+        <h2 class="section-title">📖 ชั้นหนังสือนิยายของคุณ</h2>
+        <span id="library-count" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+      </div>
+      <div id="novel-grid" class="novel-grid">
+        <!-- Novel cards rendered via JS -->
+      </div>
+    </section>
+
+    <!-- VIEW 2: Reader & Audio Player -->
+    <section id="view-reader" class="view">
+      <div class="reader-top-bar">
+        <div>
+          <div id="reader-novel-title" class="reader-novel-title">ชื่อนิยาย</div>
+          <h2 id="reader-chapter-title" class="reader-chapter-title">ตอนที่ 1</h2>
+        </div>
+        <div class="reader-controls-row">
+          <button id="btn-prev-chapter" class="btn-icon" title="บทก่อนหน้า">⏮</button>
+          <button id="btn-next-chapter" class="btn-icon" title="บทถัดไป">⏭</button>
+        </div>
+      </div>
+
+      <!-- Reading Content Box -->
+      <div id="reader-content-box" class="reader-content-box">
+        <!-- Paragraph items dynamically injected -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Sticky Bottom Audio Player Bar -->
+  <div id="bottom-player" class="bottom-player">
+    <div id="player-progress-container" class="player-progress-container" title="แตะเพื่อเลื่อนตำแหน่ง">
+      <div id="player-progress-bar" class="player-progress-bar"></div>
+    </div>
+
+    <div class="player-main-row">
+      <div class="player-info">
+        <div class="player-track-details">
+          <div id="player-track-title" class="track-title">พร้อมเล่นนิยาย</div>
+          <div id="player-track-subtitle" class="track-subtitle">เสียงคุณเปรมวดี (นุ่มนวล ลื่นหู)</div>
+        </div>
+      </div>
+
+      <div class="player-buttons">
+        <button id="btn-rewind" class="btn-player" title="ย้อน 15 วินาที / ย่อหน้าก่อน">⏪</button>
+        <button id="btn-play" class="btn-play-large" title="เล่น / หยุด">
+          <span id="btn-play-icon">▶</span>
+        </button>
+        <button id="btn-forward" class="btn-player" title="ไปข้างหน้า 15 วินาที / ย่อหน้าถัดไป">⏩</button>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="btn-speed" class="player-options-btn" title="ปรับความเร็วเสียงอ่าน">1.0x</button>
+        <button id="btn-timer" class="player-options-btn" title="ตั้งเวลาปิด">⏱</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALS OVERLAY -->
+  <div id="modal-overlay" class="modal-overlay">
+
+    <!-- QR Code / Mobile Connection Modal -->
+    <div id="modal-qr" class="modal-dialog" style="display: none;">
+      <div class="modal-header">
+        <h3 class="modal-title">📱 ใช้งานบน iPhone / Android</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="qr-container">
+        <p style="font-size: 0.9rem; margin-bottom: 12px; color: var(--text-muted);">
+          เปิดกล้องบนมือถือ (ต่อ Wi-Fi เดียวกัน) แล้วสแกนเพื่อเปิดแอปได้ทันที:
+        </p>
+        <div class="qr-image">
+          <img id="qr-image" src="" alt="QR Code" width="180" height="180">
+        </div>
+        <a id="qr-link" class="qr-link" href="#" target="_blank">http://...</a>
+        <div style="text-align: left; font-size: 0.82rem; margin-top: 14px; color: var(--text-muted); line-height: 1.6;">
+          <strong>💡 เคล็ดลับใช้งานแบบเต็มจอ (PWA):</strong><br>
+          • <strong>iOS (Safari):</strong> แตะปุ่มแชร์ (Share) ➡️ เลือก <em>"Add to Home Screen" (เพิ่มไปยังหน้าจอโฮม)</em><br>
+          • <strong>Android (Chrome):</strong> แตะจุดสามจุดบนขวา ➡️ เลือก <em>"Install App" (ติดตั้งแอป)</em><br>
+          <em>*รองรับเล่นเสียงเมื่อปิดหน้าจอ หรือล็อกเครื่องได้เหมือน Spotify / Apple Podcasts เลยค่ะ</em>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chapter List Modal -->
+    <div id="modal-chapters" class="modal-dialog" style="display: none;">
+      <div class="modal-header">
+        <h3 class="modal-title">📑 สารบัญบทนิยาย</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div id="chapter-list-container" style="max-height: 60vh; overflow-y: auto;">
+        <!-- Chapter items -->
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="modal-settings" class="modal-dialog" style="display: none;">
+      <div class="modal-header">
+        <h3 class="modal-title">⚙️ ตั้งค่าเสียงอ่านและหน้าตา</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">🎙️ เลือกเสียงนักอ่าน (TTS Voice)</label>
+        <select id="select-voice" class="select-input">
+          <option value="th-TH-PremwadeeNeural">เปรมวดี (หญิง - นุ่มนวล ละมุน ลื่นหูที่สุด ⭐)</option>
+          <option value="th-TH-NiwatNeural">นิวัฒน์ (ชาย - อบอุ่น ทรงพลัง)</option>
+        </select>
+        <small style="color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; display: block;">
+          *ขับเคลื่อนด้วย Microsoft Edge Neural TTS จำลองจังหวะเว้นวรรคและการหายใจได้เหมือนมนุษย์
+        </small>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">🎨 โทนสีสบายตา (Theme)</label>
+        <div class="theme-selector">
+          <div class="theme-btn" data-theme="theme-sepia">
+            <div class="theme-circle" style="background: #fbf0d9;"></div>
+            <span>ถนอมสายตา</span>
+          </div>
+          <div class="theme-btn" data-theme="theme-dark">
+            <div class="theme-circle" style="background: #1e293b;"></div>
+            <span>โหมดมืด</span>
+          </div>
+          <div class="theme-btn" data-theme="theme-oled">
+            <div class="theme-circle" style="background: #000000;"></div>
+            <span>ดำสนิท</span>
+          </div>
+          <div class="theme-btn" data-theme="">
+            <div class="theme-circle" style="background: #ffffff;"></div>
+            <span>สว่าง</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">🔤 ขนาดตัวอักษรเนื้อเรื่อง</label>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <button id="btn-font-decrease" class="btn-pill" style="background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">A- เล็กลง</button>
+          <span style="font-size: 0.9rem; color: var(--text-muted);">ปรับขนาดตามชอบ</span>
+          <button id="btn-font-increase" class="btn-pill" style="background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">A+ ใหญ่ขึ้น</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sleep Timer Modal -->
+    <div id="modal-timer" class="modal-dialog" style="display: none;">
+      <div class="modal-header">
+        <h3 class="modal-title">⏱️ ตั้งเวลาปิดอัตโนมัติ (Sleep Timer)</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+        เหมาะสำหรับฟังก่อนนอน เมื่อถึงเวลาเสียงจะค่อยๆ หยุดลงโดยอัตโนมัติ
+      </p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <button class="btn-pill timer-preset-btn" data-time="15" style="justify-content: center; background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">15 นาที</button>
+        <button class="btn-pill timer-preset-btn" data-time="30" style="justify-content: center; background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">30 นาที</button>
+        <button class="btn-pill timer-preset-btn" data-time="45" style="justify-content: center; background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">45 นาที</button>
+        <button class="btn-pill timer-preset-btn" data-time="60" style="justify-content: center; background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">60 นาที</button>
+        <button class="btn-pill timer-preset-btn" data-time="chapter" style="grid-column: 1 / -1; justify-content: center; background: var(--primary-light); color: var(--primary);">เมื่อจบตอนปัจจุบัน</button>
+        <button class="btn-pill timer-preset-btn" data-time="0" style="grid-column: 1 / -1; justify-content: center; background: none; color: var(--text-muted);">ยกเลิกตัวจับเวลา</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/js/app.js?v=2.0"></script>
+</body>
+</html>
