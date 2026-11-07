@@ -98,13 +98,21 @@
     <!-- VIEW 2: Reader & Audio Player -->
     <section id="view-reader" class="view">
       <div class="reader-top-bar">
-        <div>
+        <div style="flex: 1; min-width: 0;">
           <div id="reader-novel-title" class="reader-novel-title">ชื่อนิยาย</div>
-          <h2 id="reader-chapter-title" class="reader-chapter-title">ตอนที่ 1</h2>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
+            <select id="reader-chapter-select" class="select-input" style="padding: 8px 14px; font-size: 0.95rem; font-weight: 700; font-family: var(--font-title); border-radius: 12px; max-width: 280px; cursor: pointer; border: 2px solid var(--primary); background: var(--surface); color: var(--text-main);">
+              <!-- Chapter Options -->
+            </select>
+            <button id="btn-reader-chapters" class="btn-pill" style="font-size: 0.85rem; padding: 7px 12px; background: var(--primary-light); color: var(--primary); font-weight: 600; cursor: pointer; border: none;">
+              📑 สารบัญทั้งหมด
+            </button>
+          </div>
+          <h2 id="reader-chapter-title" class="reader-chapter-title" style="display: none;">ตอนที่ 1</h2>
         </div>
         <div class="reader-controls-row">
-          <button id="btn-prev-chapter" class="btn-icon" title="บทก่อนหน้า">⏮</button>
-          <button id="btn-next-chapter" class="btn-icon" title="บทถัดไป">⏭</button>
+          <button id="btn-prev-chapter" class="btn-icon" title="ตอนก่อนหน้า">⏮</button>
+          <button id="btn-next-chapter" class="btn-icon" title="ตอนถัดไป">⏭</button>
         </div>
       </div>
 

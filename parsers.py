@@ -55,7 +55,7 @@ def detect_chapters_from_text(full_text: str, default_title: str = "นิยา
     """Detect chapters by headings like บทที่ 1, ตอนที่ 1, Chapter 1, or split by chunks."""
     lines = full_text.split('\n')
     chapter_pattern = re.compile(
-        r'^\s*(บทที่\s*\d+.*|ตอนที่\s*\d+.*|Chapter\s*\d+.*|第[0-9一二三四五六七八九十百千万]+[章回节].*|\d+[\.\s]+[\u0E00-\u0E7F\w]{2,30})',
+        r'^\s*(บทที่\s*\d+.*|ตอนที่\s*\d+.*|ตอน\s*\d+.*|บท\s*\d+.*|Chapter\s*\d+.*|第[0-9一二三四五六七八九十百千万]+[章回节].*|\d+[\.\s\-]+[\u0E00-\u0E7F\w]{2,30})',
         re.IGNORECASE
     )
     
@@ -69,8 +69,10 @@ def detect_chapters_from_text(full_text: str, default_title: str = "นิยา
             if current_lines:
                 ch_text = '\n'.join(current_lines).strip()
                 if ch_text:
+                    ch_id = len(chapters) + 1
                     chapters.append({
-                        "id": len(chapters) + 1,
+                        "id": ch_id,
+                        "chapter_id": ch_id,
                         "title": current_title,
                         "content": ch_text,
                         "paragraphs": split_into_paragraphs(ch_text)
@@ -83,23 +85,32 @@ def detect_chapters_from_text(full_text: str, default_title: str = "นิยา
     if current_lines:
         ch_text = '\n'.join(current_lines).strip()
         if ch_text:
+            ch_id = len(chapters) + 1
             chapters.append({
-                "id": len(chapters) + 1,
+                "id": ch_id,
+                "chapter_id": ch_id,
                 "title": current_title if chapters else (default_title or "เนื้อเรื่อง"),
                 "content": ch_text,
                 "paragraphs": split_into_paragraphs(ch_text)
             })
             
-    # If no chapters detected and text is very long, split into parts of ~40 paragraphs
-    if len(chapters) <= 1 and chapters and len(chapters[0]["paragraphs"]) > 50:
-        all_paras = chapters[0]["paragraphs"]
-        chunk_size = 35
+    # If no chapters or only 1 chapter detected, and text is long enough, split into readable chapters
+    all_paras = []
+    if chapters:
+        for ch in chapters:
+            all_paras.extend(ch.get("paragraphs", []))
+    else:
+        all_paras = split_into_paragraphs(full_text)
+
+    if (len(chapters) <= 1) and len(all_paras) > 20:
+        chunk_size = 25  # ~25 paragraphs per chapter (around 5-8 minutes per chapter)
         new_chapters = []
         for i in range(0, len(all_paras), chunk_size):
             chunk = all_paras[i:i+chunk_size]
             part_num = (i // chunk_size) + 1
             new_chapters.append({
                 "id": part_num,
+                "chapter_id": part_num,
                 "title": f"ตอนที่ {part_num}",
                 "content": '\n'.join(chunk),
                 "paragraphs": chunk
@@ -108,6 +119,7 @@ def detect_chapters_from_text(full_text: str, default_title: str = "นิยา
         
     return chapters if chapters else [{
         "id": 1,
+        "chapter_id": 1,
         "title": default_title,
         "content": full_text,
         "paragraphs": split_into_paragraphs(full_text)
@@ -174,6 +186,7 @@ def parse_epub(file_path: str) -> Dict[str, Any]:
             if len(cleaned) > 50:
                 chapters.append({
                     "id": ch_id,
+                    "chapter_id": ch_id,
                     "title": ch_title if len(ch_title) < 80 else f"บทที่ {ch_id}",
                     "content": cleaned,
                     "paragraphs": paras
@@ -184,6 +197,7 @@ def parse_epub(file_path: str) -> Dict[str, Any]:
         # Fallback to single chapter
         chapters = [{
             "id": 1,
+            "chapter_id": 1,
             "title": title_str,
             "content": "ไม่พบเนื้อหาในไฟล์ EPUB",
             "paragraphs": ["ไม่พบเนื้อหาในไฟล์ EPUB"]
@@ -238,8 +252,10 @@ def parse_docx(file_path: str) -> Dict[str, Any]:
         if is_heading:
             if current_paras:
                 ch_text = '\n'.join(current_paras)
+                ch_id = len(chapters) + 1
                 chapters.append({
-                    "id": len(chapters) + 1,
+                    "id": ch_id,
+                    "chapter_id": ch_id,
                     "title": current_title,
                     "content": ch_text,
                     "paragraphs": current_paras
@@ -251,16 +267,42 @@ def parse_docx(file_path: str) -> Dict[str, Any]:
             
     if current_paras:
         ch_text = '\n'.join(current_paras)
+        ch_id = len(chapters) + 1
         chapters.append({
-            "id": len(chapters) + 1,
+            "id": ch_id,
+            "chapter_id": ch_id,
             "title": current_title if chapters else title,
             "content": ch_text,
             "paragraphs": current_paras
         })
         
+    all_paras = []
+    for ch in chapters:
+        all_paras.extend(ch.get("paragraphs", []))
+
+    if (len(chapters) <= 1) and len(all_paras) > 20:
+        chunk_size = 25
+        new_chapters = []
+        for i in range(0, len(all_paras), chunk_size):
+            chunk = all_paras[i:i+chunk_size]
+            part_num = (i // chunk_size) + 1
+            new_chapters.append({
+                "id": part_num,
+                "chapter_id": part_num,
+                "title": f"ตอนที่ {part_num}",
+                "content": '\n'.join(chunk),
+                "paragraphs": chunk
+            })
+        return {
+            "title": title,
+            "total_chapters": len(new_chapters),
+            "chapters": new_chapters
+        }
+
     if not chapters:
         chapters = [{
             "id": 1,
+            "chapter_id": 1,
             "title": title,
             "content": "",
             "paragraphs": []
