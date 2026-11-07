@@ -60,6 +60,16 @@
 
     <!-- VIEW 1: Novel Library -->
     <section id="view-library" class="view active">
+
+      <!-- Continue Listening Hero Card -->
+      <div id="continue-listening-card" class="continue-card" style="display: none;">
+        <div style="flex: 1; min-width: 0; padding-right: 12px;">
+          <span class="continue-badge">🎧 ฟังต่อจากเดิม</span>
+          <div id="continue-novel-title" class="continue-novel-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ชื่อนิยาย</div>
+          <div id="continue-chapter-info" class="continue-chapter-info">ตอนที่ 1 &bull; ย่อหน้าที่ 1</div>
+        </div>
+        <button id="btn-continue-play" class="btn-continue-play">▶ ฟังต่อทันที</button>
+      </div>
       
       <!-- Upload Card -->
       <div id="upload-card" class="upload-card">
@@ -219,6 +229,16 @@
           <span style="font-size: 0.9rem; color: var(--text-muted);">ปรับขนาดตามชอบ</span>
           <button id="btn-font-increase" class="btn-pill" style="background: var(--surface-hover); color: var(--text-main); border: 1px solid var(--border-color);">A+ ใหญ่ขึ้น</button>
         </div>
+      </div>
+
+      <div class="form-group" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">
+        <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+          <div>
+            <div style="font-weight: 600; font-size: 0.92rem;">⚡ เปิดแอปแล้วอ่านต่ออัตโนมัติ</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">จำจุดล่าสุดที่ฟังค้างไว้ และเปิดหน้าเล่นต่อให้ทันที</div>
+          </div>
+          <input type="checkbox" id="toggle-auto-resume" style="width: 20px; height: 20px; accent-color: var(--primary); cursor: pointer;">
+        </label>
       </div>
 
       <div class="form-group" style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 16px;">

@@ -27,6 +27,7 @@ class NovelReaderApp {
     this.sleepRemaining = 0;
     this.sleepInterval = null;
     this.deferredPrompt = null;
+    this.autoResume = localStorage.getItem('novel_auto_resume') === 'true';
 
     this.initElements();
     this.applyTheme(this.theme);
@@ -35,13 +36,20 @@ class NovelReaderApp {
     this.setupEventListeners();
     this.registerServiceWorker();
     this.fetchInfo();
-    this.loadLibrary();
+    this.loadLibrary(true);
   }
 
   initElements() {
     // Views
     this.viewLibrary = document.getElementById('view-library');
     this.viewReader = document.getElementById('view-reader');
+
+    // Continue Listening Card
+    this.continueCard = document.getElementById('continue-listening-card');
+    this.continueTitle = document.getElementById('continue-novel-title');
+    this.continueInfo = document.getElementById('continue-chapter-info');
+    this.btnContinuePlay = document.getElementById('btn-continue-play');
+    this.toggleAutoResume = document.getElementById('toggle-auto-resume');
 
     // Header & Buttons
     this.btnBack = document.getElementById('btn-back');
@@ -99,21 +107,65 @@ class NovelReaderApp {
     }
   }
 
-  async loadLibrary() {
+  async loadLibrary(isInitial = false) {
     try {
       const res = await fetch('/api/novels');
       if (res.ok) {
         this.novels = await res.json();
         this.renderLibrary();
+
+        // If auto-resume enabled on initial app open, jump straight to reading
+        if (isInitial && this.autoResume) {
+          this.triggerAutoResume();
+        }
       }
     } catch (e) {
       console.error('Failed to load library', e);
     }
   }
 
+  triggerAutoResume() {
+    try {
+      const raw = localStorage.getItem('novel_last_read');
+      if (!raw) return;
+      const lastRead = JSON.parse(raw);
+      if (lastRead && lastRead.novel_id) {
+        this.openNovel(lastRead.novel_id, lastRead.chapter_id || 1, lastRead.paragraph_idx || 0, true);
+      }
+    } catch (e) {
+      console.warn('Auto-resume failed:', e);
+    }
+  }
+
   renderLibrary() {
     if (!this.novelGrid) return;
     this.novelGrid.innerHTML = '';
+
+    // Check localStorage bookmarks
+    let localBookmarks = {};
+    try {
+      localBookmarks = JSON.parse(localStorage.getItem('novel_bookmarks') || '{}');
+    } catch (e) {}
+
+    // Update Continue Listening Hero Card
+    try {
+      const lastRead = JSON.parse(localStorage.getItem('novel_last_read') || 'null');
+      if (lastRead && lastRead.novel_id && this.continueCard) {
+        this.continueCard.style.display = 'flex';
+        this.continueTitle.textContent = lastRead.novel_title || 'นิยายที่อ่านค้างไว้';
+        const pText = (lastRead.paragraph_idx !== undefined && lastRead.paragraph_idx > 0)
+          ? ` • ย่อหน้าที่ ${lastRead.paragraph_idx + 1}`
+          : '';
+        this.continueInfo.textContent = `${lastRead.chapter_title || ('ตอนที่ ' + lastRead.chapter_id)}${pText}`;
+        this.btnContinuePlay.onclick = () => {
+          this.openNovel(lastRead.novel_id, lastRead.chapter_id, lastRead.paragraph_idx || 0, true);
+        };
+      } else if (this.continueCard) {
+        this.continueCard.style.display = 'none';
+      }
+    } catch (e) {
+      if (this.continueCard) this.continueCard.style.display = 'none';
+    }
 
     if (this.novels.length === 0) {
       this.novelGrid.innerHTML = `
@@ -134,11 +186,15 @@ class NovelReaderApp {
         ? `<span class="novel-badge-type" style="background:#e0f2fe; color:#0369a1;">คลังในเครื่อง</span>`
         : `<span class="novel-badge-type">${novel.file_ext ? novel.file_ext.toUpperCase() : 'UPLOAD'}</span>`;
 
+      const effectiveBookmark = novel.bookmark || localBookmarks[novel.id];
       let bookmarkText = '';
-      if (novel.bookmark) {
+      if (effectiveBookmark) {
+        const pText = (effectiveBookmark.paragraph_idx !== undefined && effectiveBookmark.paragraph_idx > 0)
+          ? ` (ย่อหน้าที่ ${effectiveBookmark.paragraph_idx + 1})`
+          : '';
         bookmarkText = `
           <div class="novel-bookmark-indicator">
-            <span>🔖 อ่านค้างไว้: ตอนที่ ${novel.bookmark.chapter_id}</span>
+            <span>🔖 อ่านค้างไว้: ตอนที่ ${effectiveBookmark.chapter_id}${pText}</span>
           </div>
         `;
       }
@@ -156,14 +212,15 @@ class NovelReaderApp {
       `;
 
       card.addEventListener('click', () => {
-        this.openNovel(novel.id, novel.bookmark ? novel.bookmark.chapter_id : 1, novel.bookmark ? novel.bookmark.paragraph_idx : 0);
+        const bm = effectiveBookmark;
+        this.openNovel(novel.id, bm ? bm.chapter_id : 1, bm ? (bm.paragraph_idx || 0) : 0, false);
       });
 
       this.novelGrid.appendChild(card);
     });
   }
 
-  async openNovel(novelId, chapterId = 1, startParaIdx = 0) {
+  async openNovel(novelId, chapterId = 1, startParaIdx = 0, autoPlay = false) {
     try {
       const res = await fetch(`/api/novels/${novelId}`);
       if (!res.ok) throw new Error('Failed to load novel');
@@ -178,6 +235,12 @@ class NovelReaderApp {
       this.readerNovelTitle.textContent = this.currentNovel.title;
 
       await this.loadChapter(chapterId, startParaIdx);
+
+      if (autoPlay && this.paragraphs && this.paragraphs.length > 0) {
+        setTimeout(() => {
+          this.playCurrent();
+        }, 300);
+      }
     } catch (e) {
       alert('ไม่สามารถเปิดนิยายได้: ' + e.message);
     }
@@ -570,6 +633,31 @@ class NovelReaderApp {
 
   saveCurrentBookmark() {
     if (!this.currentNovel || !this.currentChapter) return;
+
+    // 1. LocalStorage - instant & persistent across restarts/phone sleep
+    try {
+      const bookmarks = JSON.parse(localStorage.getItem('novel_bookmarks') || '{}');
+      bookmarks[this.currentNovel.id] = {
+        chapter_id: this.currentChapter.chapter_id,
+        paragraph_idx: this.currentParagraphIdx,
+        timestamp: Date.now()
+      };
+      localStorage.setItem('novel_bookmarks', JSON.stringify(bookmarks));
+
+      const lastRead = {
+        novel_id: this.currentNovel.id,
+        novel_title: this.currentNovel.title,
+        chapter_id: this.currentChapter.chapter_id,
+        chapter_title: this.currentChapter.title || `ตอนที่ ${this.currentChapter.chapter_id}`,
+        paragraph_idx: this.currentParagraphIdx,
+        timestamp: Date.now()
+      };
+      localStorage.setItem('novel_last_read', JSON.stringify(lastRead));
+    } catch (e) {
+      console.warn('Failed to save bookmark locally:', e);
+    }
+
+    // 2. Server API
     fetch('/api/bookmark', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -768,6 +856,14 @@ class NovelReaderApp {
       this.showModal(this.modalSettings);
       this.updateCacheStats();
     });
+
+    if (this.toggleAutoResume) {
+      this.toggleAutoResume.checked = this.autoResume;
+      this.toggleAutoResume.addEventListener('change', (e) => {
+        this.autoResume = e.target.checked;
+        localStorage.setItem('novel_auto_resume', this.autoResume ? 'true' : 'false');
+      });
+    }
 
     if (this.btnClearCache) {
       this.btnClearCache.addEventListener('click', () => this.clearServerCache());
