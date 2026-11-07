@@ -563,6 +563,7 @@ class NovelReaderApp {
   }
 
   async playCurrentParagraph() {
+    this.advancingParagraph = false;
     if (this.paragraphs.length === 0 || this.currentParagraphIdx >= this.paragraphs.length) {
       this.onChapterEnded();
       return;
@@ -688,7 +689,9 @@ class NovelReaderApp {
 
   setupAudioEvents() {
     this.audio.addEventListener('ended', () => {
-      this.handleAudioEnded();
+      if (!this.advancingParagraph) {
+        this.handleAudioEnded();
+      }
     });
 
     this.audio.addEventListener('playing', () => {
@@ -713,6 +716,17 @@ class NovelReaderApp {
         const paraBase = (this.currentParagraphIdx / this.paragraphs.length) * 100;
         const paraProgress = (this.audio.currentTime / this.audio.duration) * (100 / this.paragraphs.length);
         this.playerProgressBar.style.width = `${paraBase + paraProgress}%`;
+
+        // Seamless gap elimination: cut out trailing silence buffer (~180ms) for snappy paragraph transition
+        const remaining = this.audio.duration - this.audio.currentTime;
+        if (!this.advancingParagraph && remaining > 0 && remaining <= 0.18 && this.currentParagraphIdx + 1 < this.paragraphs.length) {
+          const nextText = this.paragraphs[this.currentParagraphIdx + 1];
+          const nextRawUrl = this.getAudioUrl(nextText);
+          if (this.blobCache.has(nextRawUrl)) {
+            this.advancingParagraph = true;
+            this.handleAudioEnded();
+          }
+        }
       }
     });
   }
