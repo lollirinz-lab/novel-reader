@@ -117,7 +117,7 @@ class NovelReaderApp {
     this.sleepRemaining = 0;
     this.sleepInterval = null;
     this.deferredPrompt = null;
-    this.autoResume = localStorage.getItem('novel_auto_resume') === 'true';
+    this.autoResume = localStorage.getItem('novel_auto_resume') !== 'false'; // Default to true so app always remembers where you left off!
 
     this.initElements();
     this.applyTheme(this.theme);
@@ -439,16 +439,23 @@ class NovelReaderApp {
       }
 
       this.currentChapter = chapter;
+      const chNum = parseInt(chapter.chapter_id || chapter.id || chapterId || 1);
+      this.currentChapter.id = chNum;
+      this.currentChapter.chapter_id = chNum;
+
       this.paragraphs = this.currentChapter.paragraphs || [];
-      this.currentParagraphIdx = startParaIdx;
+      this.currentParagraphIdx = parseInt(startParaIdx || 0);
 
       // Clear memory blob cache for new chapter
       this.clearBlobCache();
 
-      this.readerChapterTitle.textContent = this.currentChapter.title || `ตอนที่ ${chapterId}`;
+      this.readerChapterTitle.textContent = this.currentChapter.title || `ตอนที่ ${chNum}`;
       this.renderChapterSelect();
       this.renderParagraphs();
       this.updatePlayerInfo();
+
+      // Highlight active paragraph and scroll into view immediately
+      this.highlightActiveParagraph();
 
       // Save bookmark
       this.saveCurrentBookmark();
@@ -833,12 +840,15 @@ class NovelReaderApp {
   saveCurrentBookmark() {
     if (!this.currentNovel || !this.currentChapter) return;
 
-    // 1. LocalStorage - instant & persistent across restarts/phone sleep
+    const chId = parseInt(this.currentChapter.chapter_id || this.currentChapter.id || 1);
+    const paraIdx = parseInt(this.currentParagraphIdx || 0);
+
+    // 1. LocalStorage - instant & persistent across restarts/phone sleep/kill task
     try {
       const bookmarks = JSON.parse(localStorage.getItem('novel_bookmarks') || '{}');
       bookmarks[this.currentNovel.id] = {
-        chapter_id: this.currentChapter.chapter_id,
-        paragraph_idx: this.currentParagraphIdx,
+        chapter_id: chId,
+        paragraph_idx: paraIdx,
         timestamp: Date.now()
       };
       localStorage.setItem('novel_bookmarks', JSON.stringify(bookmarks));
@@ -846,9 +856,9 @@ class NovelReaderApp {
       const lastRead = {
         novel_id: this.currentNovel.id,
         novel_title: this.currentNovel.title,
-        chapter_id: this.currentChapter.chapter_id,
-        chapter_title: this.currentChapter.title || `ตอนที่ ${this.currentChapter.chapter_id}`,
-        paragraph_idx: this.currentParagraphIdx,
+        chapter_id: chId,
+        chapter_title: this.currentChapter.title || `ตอนที่ ${chId}`,
+        paragraph_idx: paraIdx,
         timestamp: Date.now()
       };
       localStorage.setItem('novel_last_read', JSON.stringify(lastRead));
@@ -858,8 +868,8 @@ class NovelReaderApp {
         this.db.getNovel(this.currentNovel.id).then(novel => {
           if (novel) {
             novel.bookmark = {
-              chapter_id: this.currentChapter.chapter_id || this.currentChapter.id || 1,
-              paragraph_idx: this.currentParagraphIdx,
+              chapter_id: chId,
+              paragraph_idx: paraIdx,
               timestamp: Date.now()
             };
             this.db.saveNovel(novel).catch(() => {});
@@ -876,8 +886,8 @@ class NovelReaderApp {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         novel_id: this.currentNovel.id,
-        chapter_id: this.currentChapter.chapter_id,
-        paragraph_idx: this.currentParagraphIdx
+        chapter_id: chId,
+        paragraph_idx: paraIdx
       })
     }).catch(() => {});
   }
@@ -1237,6 +1247,17 @@ class NovelReaderApp {
         }
       });
     }
+
+    // Auto-save bookmark immediately when app is minimized, switched, or task killed
+    document.addEventListener('visibilitychange', () => {
+      this.saveCurrentBookmark();
+    });
+    window.addEventListener('pagehide', () => {
+      this.saveCurrentBookmark();
+    });
+    window.addEventListener('beforeunload', () => {
+      this.saveCurrentBookmark();
+    });
   }
 
   async handleFileUpload(file) {
