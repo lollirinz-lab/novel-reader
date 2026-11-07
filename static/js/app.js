@@ -1,6 +1,96 @@
+// Local IndexedDB Storage to ensure novels NEVER disappear across server restarts/sleeps
+class NovelDB {
+  constructor() {
+    this.dbName = 'NovelReaderDB';
+    this.version = 1;
+    this.db = null;
+  }
+
+  async open() {
+    if (this.db) return this.db;
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this.dbName, this.version);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('novels')) {
+          db.createObjectStore('novels', { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = (e) => {
+        this.db = e.target.result;
+        resolve(this.db);
+      };
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  async getAllNovels() {
+    try {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('novels', 'readonly');
+        const store = tx.objectStore('novels');
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      console.warn('DB getAllNovels error:', e);
+      return [];
+    }
+  }
+
+  async getNovel(id) {
+    try {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('novels', 'readonly');
+        const store = tx.objectStore('novels');
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      console.warn('DB getNovel error:', e);
+      return null;
+    }
+  }
+
+  async saveNovel(novel) {
+    try {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('novels', 'readwrite');
+        const store = tx.objectStore('novels');
+        const req = store.put(novel);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      console.warn('DB saveNovel error:', e);
+    }
+  }
+
+  async deleteNovel(id) {
+    try {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('novels', 'readwrite');
+        const store = tx.objectStore('novels');
+        const req = store.delete(id);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      console.warn('DB deleteNovel error:', e);
+    }
+  }
+}
+
 // Novel Reader PWA - Frontend Application Logic with In-Memory Blob Preloading & Auto-Recovery
 class NovelReaderApp {
   constructor() {
+    this.db = new NovelDB();
     this.novels = [];
     this.currentNovel = null;
     this.currentChapter = null;
@@ -108,19 +198,43 @@ class NovelReaderApp {
   }
 
   async loadLibrary(isInitial = false) {
+    // 1. Immediately load local novels stored in IndexedDB (instant offline persistence!)
+    try {
+      const localNovels = await this.db.getAllNovels();
+      if (localNovels && localNovels.length > 0) {
+        this.novels = localNovels;
+        this.renderLibrary();
+      }
+    } catch (e) {
+      console.warn('Could not load local novels:', e);
+    }
+
+    // 2. Fetch server library to sync new or existing files
     try {
       const res = await fetch('/api/novels');
       if (res.ok) {
-        this.novels = await res.json();
+        const serverNovels = await res.json();
+        const novelMap = new Map();
+        // Local novels take priority for offline full-text
+        this.novels.forEach(n => novelMap.set(n.id, n));
+        serverNovels.forEach(sn => {
+          if (!novelMap.has(sn.id)) {
+            novelMap.set(sn.id, sn);
+          } else {
+            const existing = novelMap.get(sn.id);
+            if (sn.bookmark && !existing.bookmark) existing.bookmark = sn.bookmark;
+          }
+        });
+        this.novels = Array.from(novelMap.values());
         this.renderLibrary();
-
-        // If auto-resume enabled on initial app open, jump straight to reading
-        if (isInitial && this.autoResume) {
-          this.triggerAutoResume();
-        }
       }
     } catch (e) {
-      console.error('Failed to load library', e);
+      console.log('Server not reachable or offline, using local library');
+    }
+
+    // 3. If auto-resume enabled on initial app open, jump straight to reading
+    if (isInitial && this.autoResume) {
+      this.triggerAutoResume();
     }
   }
 
@@ -200,16 +314,41 @@ class NovelReaderApp {
       }
 
       card.innerHTML = `
-        <div class="novel-card-header">
+        <div class="novel-card-header" style="position: relative;">
           <div class="novel-cover-icon">📖</div>
-          <div class="novel-info">
+          <div class="novel-info" style="flex: 1; min-width: 0;">
             ${typeBadge}
             <h3 title="${novel.title}">${novel.title}</h3>
             <p class="novel-meta">รวม ${novel.total_chapters || 0} ตอน</p>
           </div>
+          <button class="btn-card-delete" title="ลบนิยายนี้ออกจากเครื่อง" style="background: none; border: none; font-size: 1.1rem; cursor: pointer; padding: 4px 6px; opacity: 0.45; transition: opacity 0.2s; align-self: flex-start;">🗑️</button>
         </div>
         ${bookmarkText}
       `;
+
+      // Handle delete novel
+      const btnDel = card.querySelector('.btn-card-delete');
+      if (btnDel) {
+        btnDel.addEventListener('mouseenter', () => btnDel.style.opacity = '1.0');
+        btnDel.addEventListener('mouseleave', () => btnDel.style.opacity = '0.45');
+        btnDel.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (confirm(`คุณต้องการลบนิยายเรื่อง "${novel.title}" ออกจากเครื่องหรือไม่?`)) {
+            await this.db.deleteNovel(novel.id);
+            fetch(`/api/novels/${novel.id}`, { method: 'DELETE' }).catch(() => {});
+            try {
+              const lr = JSON.parse(localStorage.getItem('novel_last_read') || 'null');
+              if (lr && lr.novel_id === novel.id) {
+                localStorage.removeItem('novel_last_read');
+              }
+              const bms = JSON.parse(localStorage.getItem('novel_bookmarks') || '{}');
+              delete bms[novel.id];
+              localStorage.setItem('novel_bookmarks', JSON.stringify(bms));
+            } catch (err) {}
+            await this.loadLibrary();
+          }
+        });
+      }
 
       card.addEventListener('click', () => {
         const bm = effectiveBookmark;
@@ -222,9 +361,20 @@ class NovelReaderApp {
 
   async openNovel(novelId, chapterId = 1, startParaIdx = 0, autoPlay = false) {
     try {
-      const res = await fetch(`/api/novels/${novelId}`);
-      if (!res.ok) throw new Error('Failed to load novel');
-      this.currentNovel = await res.json();
+      // 1. Try local IndexedDB first (0ms load time, offline ready!)
+      let novel = await this.db.getNovel(novelId);
+      if (!novel || !novel.chapters || novel.chapters.length === 0) {
+        // Fetch from server if not found in local db
+        const res = await fetch(`/api/novels/${novelId}`);
+        if (res.ok) {
+          novel = await res.json();
+          // Save to local IndexedDB for permanent local storage
+          await this.db.saveNovel(novel);
+        }
+      }
+
+      if (!novel) throw new Error('ไม่พบข้อมูลนิยาย');
+      this.currentNovel = novel;
 
       // Show Reader View
       this.viewLibrary.classList.remove('active');
@@ -255,16 +405,28 @@ class NovelReaderApp {
         </div>
       `;
 
-      const res = await fetch(`/api/novels/${this.currentNovel.id}/chapter/${chapterId}`);
-      if (!res.ok) throw new Error('Chapter not found');
-      this.currentChapter = await res.json();
+      let chapter = null;
+      // 1. Try finding in currentNovel.chapters (Instant local load)
+      if (this.currentNovel && this.currentNovel.chapters && this.currentNovel.chapters.length > 0) {
+        chapter = this.currentNovel.chapters.find(c => String(c.id || c.chapter_id) === String(chapterId)) ||
+                  this.currentNovel.chapters[parseInt(chapterId) - 1];
+      }
+
+      // 2. If not found locally, fetch from server
+      if (!chapter || !chapter.paragraphs) {
+        const res = await fetch(`/api/novels/${this.currentNovel.id}/chapter/${chapterId}`);
+        if (!res.ok) throw new Error('Chapter not found');
+        chapter = await res.json();
+      }
+
+      this.currentChapter = chapter;
       this.paragraphs = this.currentChapter.paragraphs || [];
       this.currentParagraphIdx = startParaIdx;
 
       // Clear memory blob cache for new chapter
       this.clearBlobCache();
 
-      this.readerChapterTitle.textContent = this.currentChapter.title;
+      this.readerChapterTitle.textContent = this.currentChapter.title || `ตอนที่ ${chapterId}`;
       this.renderParagraphs();
       this.updatePlayerInfo();
 
@@ -653,11 +815,25 @@ class NovelReaderApp {
         timestamp: Date.now()
       };
       localStorage.setItem('novel_last_read', JSON.stringify(lastRead));
+
+      // 2. Also update IndexedDB copy so novel bookmark persists permanently
+      if (this.currentNovel && this.currentNovel.id) {
+        this.db.getNovel(this.currentNovel.id).then(novel => {
+          if (novel) {
+            novel.bookmark = {
+              chapter_id: this.currentChapter.chapter_id || this.currentChapter.id || 1,
+              paragraph_idx: this.currentParagraphIdx,
+              timestamp: Date.now()
+            };
+            this.db.saveNovel(novel).catch(() => {});
+          }
+        }).catch(() => {});
+      }
     } catch (e) {
       console.warn('Failed to save bookmark locally:', e);
     }
 
-    // 2. Server API
+    // 3. Server API
     fetch('/api/bookmark', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1019,6 +1195,10 @@ class NovelReaderApp {
       }
 
       const novel = await res.json();
+      // Store complete parsed novel into IndexedDB immediately (never lost across restarts!)
+      if (novel) {
+        await this.db.saveNovel(novel);
+      }
       await this.loadLibrary();
       // Immediately open novel
       this.openNovel(novel.id, 1, 0);

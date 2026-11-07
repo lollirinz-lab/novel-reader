@@ -199,7 +199,10 @@ async def upload_novel(file: UploadFile = File(...)):
     lib.insert(0, entry)
     save_library(lib)
     
-    return entry
+    return {
+        **entry,
+        "chapters": parsed_data.get("chapters", [])
+    }
 
 @app.delete("/api/novels/{novel_id}")
 async def delete_novel(novel_id: str):
@@ -246,16 +249,12 @@ async def get_novel_details(novel_id: str):
         with open(novel_data_file, "r", encoding="utf-8") as f:
             data = json.load(f)
             
-        chapters_summary = [
-            {"id": ch["id"], "title": ch["title"]}
-            for ch in data.get("chapters", [])
-        ]
         return {
             "id": novel_id,
             "title": data.get("title", "นิยาย"),
             "type": "uploaded",
-            "total_chapters": len(chapters_summary),
-            "chapters": chapters_summary
+            "total_chapters": len(data.get("chapters", [])),
+            "chapters": data.get("chapters", [])
         }
 
 @app.get("/api/novels/{novel_id}/chapter/{chapter_id}")
