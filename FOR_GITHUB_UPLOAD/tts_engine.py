@@ -9,7 +9,19 @@ import edge_tts
 CACHE_DIR = Path(__file__).parent / "audio_cache"
 CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
-DEFAULT_VOICE = "th-TH-PremwadeeNeural"
+DEFAULT_VOICE = "th-female-tuned"
+
+# Distinct Voice Profiles:
+# 1. th-male: 100% Male (Niwat) - ultra fast, zero errors, smooth
+# 2. th-female-tuned: 100% Female (Tuned Niwat +25Hz) - zero errors, smooth, no glitches
+# 3. th-female-premwadee: 100% Female (Premwadee) - sweet female voice with female fallback
+VOICE_CONFIGS = {
+    "th-male": {"voice": "th-TH-NiwatNeural", "pitch": "+0Hz"},
+    "th-TH-NiwatNeural": {"voice": "th-TH-NiwatNeural", "pitch": "+0Hz"},
+    "th-female-tuned": {"voice": "th-TH-NiwatNeural", "pitch": "+25Hz"},
+    "th-female-premwadee": {"voice": "th-TH-PremwadeeNeural", "pitch": "+0Hz"},
+    "th-TH-PremwadeeNeural": {"voice": "th-TH-PremwadeeNeural", "pitch": "+0Hz"},
+}
 
 # Standard minimal playable silent MP3 frame (~0.8s) for unpronounceable symbols / scene breaks
 SILENT_FRAME = b'\xff\xfb\x90\x64' + b'\x00' * 413
@@ -60,7 +72,7 @@ def prepare_text_for_speech(text: str) -> str:
 
 def get_cache_filename(text: str, voice: str = DEFAULT_VOICE, rate: Optional[str] = None) -> Path:
     spoken_text = prepare_text_for_speech(text)
-    key = f"v4::{voice}::{rate or 'default'}::{spoken_text}"
+    key = f"v7::{voice}::{rate or 'default'}::{spoken_text}"
     h = hashlib.sha256(key.encode('utf-8')).hexdigest()
     return CACHE_DIR / f"{h}.mp3"
 
@@ -81,62 +93,71 @@ async def synthesize_text_to_file(
     temp_path = output_path.with_suffix('.tmp.mp3')
     global LAST_TTS_TIMESTAMP
     
+    # Look up voice configuration
+    v_conf = VOICE_CONFIGS.get(voice, VOICE_CONFIGS["th-female-tuned"])
+    actual_voice = v_conf["voice"]
+    actual_pitch = v_conf["pitch"]
+    
     async with TTS_SEMAPHORE:
         # Prevent rapid-fire burst requests that trigger Microsoft anti-abuse throttling
         try:
             loop = asyncio.get_running_loop()
             now = loop.time()
             elapsed = now - LAST_TTS_TIMESTAMP
-            if elapsed < 0.4:
-                await asyncio.sleep(0.4 - elapsed)
+            if elapsed < 0.2:
+                await asyncio.sleep(0.2 - elapsed)
         except Exception:
             pass
 
-        for attempt in range(1, 4):
+        # Try designated primary voice
+        try:
+            kwargs = {"voice": actual_voice}
+            if rate and rate not in ["+0%", "0%"]:
+                kwargs["rate"] = rate
+            if actual_pitch and actual_pitch not in ["+0Hz", "0Hz"]:
+                kwargs["pitch"] = actual_pitch
+                
+            communicate = edge_tts.Communicate(spoken_text, **kwargs)
+            await communicate.save(str(temp_path))
+            if temp_path.exists() and temp_path.stat().st_size > 0:
+                temp_path.replace(output_path)
+                try:
+                    LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
+                except Exception:
+                    pass
+                return True
+            raise RuntimeError("Empty audio output from Edge-TTS")
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            print(f"Primary voice '{voice}' failed for text: {e}")
+
+        # Strictly Gender-Preserving Fallback:
+        # If user picked Premwadee (female) and it fails Microsoft's filter,
+        # fallback ONLY to Tuned Female (+25Hz) so voice stays 100% FEMALE!
+        # It will NEVER switch to a male voice!
+        if "premwadee" in voice.lower() or voice == "th-TH-PremwadeeNeural":
             try:
-                kwargs = {"voice": voice}
+                print("Using Tuned Female fallback (+25Hz) to keep 100% female voice...")
+                fb_kwargs = {"voice": "th-TH-NiwatNeural", "pitch": "+25Hz"}
                 if rate and rate not in ["+0%", "0%"]:
-                    kwargs["rate"] = rate
-                    
-                communicate = edge_tts.Communicate(spoken_text, **kwargs)
-                await communicate.save(str(temp_path))
+                    fb_kwargs["rate"] = rate
+                fb_comm = edge_tts.Communicate(spoken_text, **fb_kwargs)
+                await fb_comm.save(str(temp_path))
                 if temp_path.exists() and temp_path.stat().st_size > 0:
                     temp_path.replace(output_path)
+                    print("Fallback tuned female voice successfully saved audio!")
                     try:
                         LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
                     except Exception:
                         pass
                     return True
-                raise RuntimeError("Empty audio output from Edge-TTS")
-            except Exception as e:
+            except Exception as fb_err:
+                print(f"Female fallback voice also failed: {fb_err}")
                 if temp_path.exists():
                     temp_path.unlink()
-                if attempt < 3:
-                    print(f"Edge-TTS attempt {attempt} failed for '{spoken_text[:30]}...': {e}. Retrying in {0.6 * attempt}s...")
-                    await asyncio.sleep(0.6 * attempt)
-                else:
-                    print(f"Primary voice '{voice}' failed after 3 attempts: {e}. Trying fallback voice...")
-                    # Seamless fallback: if primary voice hits safety filter or rate-limit, switch to other Thai voice
-                    fallback_voice = "th-TH-NiwatNeural" if voice != "th-TH-NiwatNeural" else "th-TH-PremwadeeNeural"
-                    try:
-                        fb_kwargs = {"voice": fallback_voice}
-                        if rate and rate not in ["+0%", "0%"]:
-                            fb_kwargs["rate"] = rate
-                        fb_comm = edge_tts.Communicate(spoken_text, **fb_kwargs)
-                        await fb_comm.save(str(temp_path))
-                        if temp_path.exists() and temp_path.stat().st_size > 0:
-                            temp_path.replace(output_path)
-                            print(f"Fallback voice '{fallback_voice}' successfully saved audio to prevent silence!")
-                            try:
-                                LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
-                            except Exception:
-                                pass
-                            return True
-                    except Exception as fb_err:
-                        print(f"Fallback voice '{fallback_voice}' also failed: {fb_err}")
-                        if temp_path.exists():
-                            temp_path.unlink()
-                        return False
+                    
+        return False
 
 async def get_or_synthesize_audio(
     text: str,

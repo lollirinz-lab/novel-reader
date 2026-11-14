@@ -114,7 +114,9 @@ class NovelReaderApp {
     }
     
     // User preferences
-    this.voice = localStorage.getItem('novel_voice') || 'th-TH-PremwadeeNeural';
+    this.voice = localStorage.getItem('novel_voice') || 'th-female-tuned';
+    if (this.voice === 'th-TH-PremwadeeNeural') this.voice = 'th-female-premwadee';
+    if (this.voice === 'th-TH-NiwatNeural') this.voice = 'th-male';
     this.speed = parseFloat(localStorage.getItem('novel_speed') || '1.0');
     this.fontSize = parseInt(localStorage.getItem('novel_font_size') || '18');
     this.theme = localStorage.getItem('novel_theme') || 'theme-sepia';
@@ -1175,6 +1177,8 @@ class NovelReaderApp {
     });
 
     // Voice selector
+    if (this.voice === 'th-TH-PremwadeeNeural') this.voice = 'th-female-premwadee';
+    if (this.voice === 'th-TH-NiwatNeural') this.voice = 'th-male';
     this.selectVoice.value = this.voice;
     this.selectVoice.addEventListener('change', (e) => {
       this.voice = e.target.value;
