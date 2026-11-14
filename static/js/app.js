@@ -114,7 +114,7 @@ class NovelReaderApp {
     }
     
     // User preferences
-    this.voice = localStorage.getItem('novel_voice') || 'th-female-tuned';
+    this.voice = localStorage.getItem('novel_voice') || 'th-female-premwadee';
     if (this.voice === 'th-TH-PremwadeeNeural') this.voice = 'th-female-premwadee';
     if (this.voice === 'th-TH-NiwatNeural') this.voice = 'th-male';
     this.speed = parseFloat(localStorage.getItem('novel_speed') || '1.0');

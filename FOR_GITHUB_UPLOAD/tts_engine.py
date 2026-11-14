@@ -9,7 +9,7 @@ import edge_tts
 CACHE_DIR = Path(__file__).parent / "audio_cache"
 CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
-DEFAULT_VOICE = "th-female-tuned"
+DEFAULT_VOICE = "th-female-premwadee"
 
 # Distinct Voice Profiles:
 # 1. th-male: 100% Male (Niwat) - ultra fast, zero errors, smooth
@@ -72,7 +72,7 @@ def prepare_text_for_speech(text: str) -> str:
 
 def get_cache_filename(text: str, voice: str = DEFAULT_VOICE, rate: Optional[str] = None) -> Path:
     spoken_text = prepare_text_for_speech(text)
-    key = f"v7::{voice}::{rate or 'default'}::{spoken_text}"
+    key = f"v9::{voice}::{rate or 'default'}::{spoken_text}"
     h = hashlib.sha256(key.encode('utf-8')).hexdigest()
     return CACHE_DIR / f"{h}.mp3"
 
@@ -93,8 +93,8 @@ async def synthesize_text_to_file(
     temp_path = output_path.with_suffix('.tmp.mp3')
     global LAST_TTS_TIMESTAMP
     
-    # Look up voice configuration
-    v_conf = VOICE_CONFIGS.get(voice, VOICE_CONFIGS["th-female-tuned"])
+    # Look up voice configuration - STRICTLY PRESERVES EXACT USER CHOICE
+    v_conf = VOICE_CONFIGS.get(voice, VOICE_CONFIGS["th-female-premwadee"])
     actual_voice = v_conf["voice"]
     actual_pitch = v_conf["pitch"]
     
@@ -109,53 +109,33 @@ async def synthesize_text_to_file(
         except Exception:
             pass
 
-        # Try designated primary voice
-        try:
-            kwargs = {"voice": actual_voice}
-            if rate and rate not in ["+0%", "0%"]:
-                kwargs["rate"] = rate
-            if actual_pitch and actual_pitch not in ["+0Hz", "0Hz"]:
-                kwargs["pitch"] = actual_pitch
-                
-            communicate = edge_tts.Communicate(spoken_text, **kwargs)
-            await communicate.save(str(temp_path))
-            if temp_path.exists() and temp_path.stat().st_size > 0:
-                temp_path.replace(output_path)
-                try:
-                    LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
-                except Exception:
-                    pass
-                return True
-            raise RuntimeError("Empty audio output from Edge-TTS")
-        except Exception as e:
-            if temp_path.exists():
-                temp_path.unlink()
-            print(f"Primary voice '{voice}' failed for text: {e}")
-
-        # Strictly Gender-Preserving Fallback:
-        # If user picked Premwadee (female) and it fails Microsoft's filter,
-        # fallback ONLY to Tuned Female (+25Hz) so voice stays 100% FEMALE!
-        # It will NEVER switch to a male voice!
-        if "premwadee" in voice.lower() or voice == "th-TH-PremwadeeNeural":
+        # Synthesize with the exact chosen voice (NO hijacking, NO cross-voice substitution)
+        for attempt in range(1, 4):
             try:
-                print("Using Tuned Female fallback (+25Hz) to keep 100% female voice...")
-                fb_kwargs = {"voice": "th-TH-NiwatNeural", "pitch": "+25Hz"}
+                kwargs = {"voice": actual_voice}
                 if rate and rate not in ["+0%", "0%"]:
-                    fb_kwargs["rate"] = rate
-                fb_comm = edge_tts.Communicate(spoken_text, **fb_kwargs)
-                await fb_comm.save(str(temp_path))
+                    kwargs["rate"] = rate
+                if actual_pitch and actual_pitch not in ["+0Hz", "0Hz"]:
+                    kwargs["pitch"] = actual_pitch
+                    
+                communicate = edge_tts.Communicate(spoken_text, **kwargs)
+                await communicate.save(str(temp_path))
                 if temp_path.exists() and temp_path.stat().st_size > 0:
                     temp_path.replace(output_path)
-                    print("Fallback tuned female voice successfully saved audio!")
                     try:
                         LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
                     except Exception:
                         pass
                     return True
-            except Exception as fb_err:
-                print(f"Female fallback voice also failed: {fb_err}")
+                raise RuntimeError("Empty audio output from Edge-TTS")
+            except Exception as e:
                 if temp_path.exists():
                     temp_path.unlink()
+                if attempt < 3:
+                    await asyncio.sleep(0.5 * attempt)
+                else:
+                    print(f"Voice '{actual_voice}' failed after 3 attempts: {e}")
+                    return False
                     
         return False
 
