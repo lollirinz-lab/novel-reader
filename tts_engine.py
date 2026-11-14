@@ -15,8 +15,9 @@ DEFAULT_VOICE = "th-TH-PremwadeeNeural"
 SILENT_FRAME = b'\xff\xfb\x90\x64' + b'\x00' * 413
 SILENT_MP3 = SILENT_FRAME * 30
 
-# Concurrency semaphore to allow snappy multi-paragraph TTS
-TTS_SEMAPHORE = asyncio.Semaphore(5)
+# Strict single-concurrency lock to prevent Microsoft Edge-TTS connection drops
+TTS_SEMAPHORE = asyncio.Semaphore(1)
+LAST_TTS_TIMESTAMP = 0.0
 
 def prepare_text_for_speech(text: str) -> str:
     """
@@ -78,8 +79,19 @@ async def synthesize_text_to_file(
         return True
         
     temp_path = output_path.with_suffix('.tmp.mp3')
+    global LAST_TTS_TIMESTAMP
     
     async with TTS_SEMAPHORE:
+        # Prevent rapid-fire burst requests that trigger Microsoft anti-abuse throttling
+        try:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            elapsed = now - LAST_TTS_TIMESTAMP
+            if elapsed < 0.4:
+                await asyncio.sleep(0.4 - elapsed)
+        except Exception:
+            pass
+
         for attempt in range(1, 4):
             try:
                 kwargs = {"voice": voice}
@@ -90,17 +102,41 @@ async def synthesize_text_to_file(
                 await communicate.save(str(temp_path))
                 if temp_path.exists() and temp_path.stat().st_size > 0:
                     temp_path.replace(output_path)
+                    try:
+                        LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
+                    except Exception:
+                        pass
                     return True
                 raise RuntimeError("Empty audio output from Edge-TTS")
             except Exception as e:
                 if temp_path.exists():
                     temp_path.unlink()
                 if attempt < 3:
-                    print(f"Edge-TTS attempt {attempt} failed for '{spoken_text[:30]}...': {e}. Retrying in {0.5 * attempt}s...")
-                    await asyncio.sleep(0.5 * attempt)
+                    print(f"Edge-TTS attempt {attempt} failed for '{spoken_text[:30]}...': {e}. Retrying in {0.6 * attempt}s...")
+                    await asyncio.sleep(0.6 * attempt)
                 else:
-                    print(f"Edge-TTS failed after 3 attempts: {e}.")
-                    return False
+                    print(f"Primary voice '{voice}' failed after 3 attempts: {e}. Trying fallback voice...")
+                    # Seamless fallback: if primary voice hits safety filter or rate-limit, switch to other Thai voice
+                    fallback_voice = "th-TH-NiwatNeural" if voice != "th-TH-NiwatNeural" else "th-TH-PremwadeeNeural"
+                    try:
+                        fb_kwargs = {"voice": fallback_voice}
+                        if rate and rate not in ["+0%", "0%"]:
+                            fb_kwargs["rate"] = rate
+                        fb_comm = edge_tts.Communicate(spoken_text, **fb_kwargs)
+                        await fb_comm.save(str(temp_path))
+                        if temp_path.exists() and temp_path.stat().st_size > 0:
+                            temp_path.replace(output_path)
+                            print(f"Fallback voice '{fallback_voice}' successfully saved audio to prevent silence!")
+                            try:
+                                LAST_TTS_TIMESTAMP = asyncio.get_running_loop().time()
+                            except Exception:
+                                pass
+                            return True
+                    except Exception as fb_err:
+                        print(f"Fallback voice '{fallback_voice}' also failed: {fb_err}")
+                        if temp_path.exists():
+                            temp_path.unlink()
+                        return False
 
 async def get_or_synthesize_audio(
     text: str,

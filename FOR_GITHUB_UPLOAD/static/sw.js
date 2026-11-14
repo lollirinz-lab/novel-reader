@@ -1,4 +1,4 @@
-const CACHE_NAME = 'novel-reader-cache-v5';
+const CACHE_NAME = 'novel-reader-cache-v6';
 const ASSETS_TO_CACHE = [
   '/',
   '/static/manifest.json',

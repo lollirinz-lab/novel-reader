@@ -574,11 +574,13 @@ class NovelReaderApp {
       this.updateMediaSession();
       this.saveCurrentBookmark();
 
-      // Preload next paragraph into browser cache
-      this.preloadBlob(this.currentParagraphIdx + 1);
-
-      // Server-side prefetch
-      this.prefetchNext();
+      // Gently preload next paragraph after 2.5s to avoid network congestion & API rate-limits
+      if (this.preloadTimeout) clearTimeout(this.preloadTimeout);
+      this.preloadTimeout = setTimeout(() => {
+        if (this.isPlaying) {
+          this.preloadBlob(this.currentParagraphIdx + 1);
+        }
+      }, 2500);
     } catch (e) {
       console.warn('Playback error or autoplay blocked on paragraph', this.currentParagraphIdx, e);
       this.handlePlaybackFailure();
@@ -636,7 +638,7 @@ class NovelReaderApp {
   // Anti-Freeze Watchdog: if audio stalls or goes silent for too long, automatically recover
   resetWatchdog() {
     this.clearWatchdog();
-    // 12 seconds watchdog to accommodate mobile latency & cold starts without premature skipping
+    // 22 seconds watchdog to accommodate server retry backoffs without premature paragraph skips
     this.watchdogTimer = setTimeout(() => {
       if (this.isPlaying && (this.audio.paused || this.audio.readyState < 2)) {
         // If browser is actively downloading bytes from server, don't abort!
@@ -648,7 +650,7 @@ class NovelReaderApp {
         console.warn('Stall detected by watchdog on paragraph', this.currentParagraphIdx);
         this.handlePlaybackFailure();
       }
-    }, 12000);
+    }, 22000);
   }
 
   clearWatchdog() {
@@ -668,23 +670,7 @@ class NovelReaderApp {
   }
 
   prefetchNext() {
-    const upcoming = [];
-    for (let i = 1; i <= 5; i++) {
-      const nextIdx = this.currentParagraphIdx + i;
-      if (nextIdx < this.paragraphs.length) {
-        upcoming.push(this.paragraphs[nextIdx]);
-      }
-    }
-    if (upcoming.length > 0) {
-      fetch('/api/tts/prefetch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paragraphs: upcoming,
-          voice: this.voice
-        })
-      }).catch(() => {});
-    }
+    // Disabled batch prefetch to prevent Microsoft API concurrent connection drops
   }
 
   togglePlay() {
