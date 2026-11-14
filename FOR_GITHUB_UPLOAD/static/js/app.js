@@ -118,6 +118,7 @@ class NovelReaderApp {
     this.sleepInterval = null;
     this.deferredPrompt = null;
     this.autoResume = localStorage.getItem('novel_auto_resume') !== 'false'; // Default to true so app always remembers where you left off!
+    this.paragraphRetryCount = 0;
 
     this.initElements();
     this.applyTheme(this.theme);
@@ -502,6 +503,7 @@ class NovelReaderApp {
   jumpToParagraph(idx) {
     if (idx < 0 || idx >= this.paragraphs.length) return;
     this.currentParagraphIdx = idx;
+    this.paragraphRetryCount = 0;
     this.highlightActiveParagraph();
     this.playCurrentParagraph();
   }
@@ -589,6 +591,7 @@ class NovelReaderApp {
     try {
       await this.audio.play();
       this.isPlaying = true;
+      this.paragraphRetryCount = 0; // Successfully playing, reset retry count
       this.updatePlayBtnState();
       this.highlightActiveParagraph();
       this.updateMediaSession();
@@ -600,14 +603,47 @@ class NovelReaderApp {
       // Server-side prefetch
       this.prefetchNext();
     } catch (e) {
-      console.warn('Playback error or autoplay blocked:', e);
-      // If error, trigger recovery watchdog
-      this.scheduleRecovery(1500);
+      console.warn('Playback error or autoplay blocked on paragraph', this.currentParagraphIdx, e);
+      this.handlePlaybackFailure();
     }
+  }
+
+  handlePlaybackFailure() {
+    this.clearWatchdog();
+    if (!this.isPlaying) return;
+
+    // Retry the current paragraph up to 2 times instead of skipping immediately!
+    if (this.paragraphRetryCount < 2) {
+      this.paragraphRetryCount++;
+      console.log(`Audio stall or error on paragraph ${this.currentParagraphIdx}, retrying (attempt ${this.paragraphRetryCount})...`);
+
+      // Invalidate any bad blob cache entry for this paragraph
+      const text = this.paragraphs[this.currentParagraphIdx];
+      if (text) {
+        const rawUrl = this.getAudioUrl(text);
+        if (this.blobCache.has(rawUrl)) {
+          URL.revokeObjectURL(this.blobCache.get(rawUrl));
+          this.blobCache.delete(rawUrl);
+        }
+      }
+
+      setTimeout(() => {
+        if (this.isPlaying) {
+          this.playCurrentParagraph();
+        }
+      }, 1000);
+      return;
+    }
+
+    // Only skip after 2 failed retries to avoid getting permanently stuck
+    console.warn(`Paragraph ${this.currentParagraphIdx} failed after 2 retries. Moving to next paragraph.`);
+    this.paragraphRetryCount = 0;
+    this.handleAudioEnded();
   }
 
   handleAudioEnded() {
     this.clearWatchdog();
+    this.paragraphRetryCount = 0;
     if (!this.isPlaying) return;
 
     if (this.currentParagraphIdx + 1 < this.paragraphs.length) {
@@ -621,12 +657,19 @@ class NovelReaderApp {
   // Anti-Freeze Watchdog: if audio stalls or goes silent for too long, automatically recover
   resetWatchdog() {
     this.clearWatchdog();
+    // 12 seconds watchdog to accommodate mobile latency & cold starts without premature skipping
     this.watchdogTimer = setTimeout(() => {
       if (this.isPlaying && (this.audio.paused || this.audio.readyState < 2)) {
-        console.warn('Stall detected by watchdog! Auto-recovering playback...');
-        this.handleAudioEnded();
+        // If browser is actively downloading bytes from server, don't abort!
+        if (this.audio.networkState === HTMLMediaElement.NETWORK_LOADING) {
+          console.log('Audio is still downloading bytes from server, extending watchdog...');
+          this.resetWatchdog();
+          return;
+        }
+        console.warn('Stall detected by watchdog on paragraph', this.currentParagraphIdx);
+        this.handlePlaybackFailure();
       }
-    }, 4500);
+    }, 12000);
   }
 
   clearWatchdog() {
@@ -640,7 +683,7 @@ class NovelReaderApp {
     setTimeout(() => {
       if (this.isPlaying && this.audio.paused) {
         console.warn('Auto-recovering stalled audio...');
-        this.handleAudioEnded();
+        this.handlePlaybackFailure();
       }
     }, ms);
   }
@@ -714,8 +757,8 @@ class NovelReaderApp {
     });
 
     this.audio.addEventListener('error', (e) => {
-      console.warn('Audio element error detected, skipping to next paragraph in 500ms...', e);
-      this.scheduleRecovery(500);
+      console.warn('Audio element error detected on paragraph', this.currentParagraphIdx, e);
+      this.handlePlaybackFailure();
     });
 
     this.audio.addEventListener('timeupdate', () => {

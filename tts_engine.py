@@ -11,33 +11,55 @@ CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
 DEFAULT_VOICE = "th-TH-PremwadeeNeural"
 
+# Standard minimal playable silent MP3 frame (~0.8s) for unpronounceable symbols / scene breaks
+SILENT_FRAME = b'\xff\xfb\x90\x64' + b'\x00' * 413
+SILENT_MP3 = SILENT_FRAME * 30
+
+# Concurrency semaphore to prevent Edge-TTS WebSocket drops
+TTS_SEMAPHORE = asyncio.Semaphore(2)
+
 def prepare_text_for_speech(text: str) -> str:
     """
     Format text for natural Thai novel reading cadence:
-    1. Replace spaces between Thai words with ', ' so the narrator takes a natural brief pause.
-    2. Strip trailing dots, commas, or dashes at the end of paragraphs to eliminate trailing silence.
+    1. Strip unpronounceable characters or dividers.
+    2. Replace spaces between Thai words with ', ' for natural breathing pauses.
+    3. Strip trailing punctuation so narrator doesn't add trailing dead-air.
     """
     clean_str = text.strip()
     if not clean_str:
         return ""
         
-    # Replace spaces between Thai characters with comma for a natural clause breath pause
-    t = re.sub(r'(?<=[\u0E00-\u0E7F])\s+(?=[\u0E00-\u0E7F])', ', ', clean_str)
+    # Check if text contains any pronounceable letters or digits
+    if not re.search(r'[\u0E00-\u0E7Fa-zA-Z0-9]', clean_str):
+        return ""
+        
+    # Replace decorative symbols, scene breaks, and dividers with spaces
+    t = re.sub(r'[*#_~\|\^=\+]+', ' ', clean_str)
     
-    # Normalize multiple dots or ellipsis to a short comma pause if followed by text
+    # Normalize Chinese/special punctuation
+    t = t.replace('，', ', ').replace('。', '. ').replace('！', '! ').replace('？', '? ')
+    t = t.replace('：', ': ').replace('；', '; ').replace('、', ', ').replace('～', ' ')
+    t = re.sub(r'[「」『』【】《》〈〉\[\]\{\}]', ' ', t)
+    
+    # Replace spaces between Thai characters with comma for a natural clause breath pause
+    t = re.sub(r'(?<=[\u0E00-\u0E7F])\s+(?=[\u0E00-\u0E7F])', ', ', t)
+    
+    # Normalize multiple dots or ellipsis
     t = re.sub(r'[\.]{2,}', ', ', t)
     t = re.sub(r'…+', ', ', t)
     
-    # Remove trailing periods, commas, ellipses, dashes at the very end of the paragraph
-    # so Edge-TTS doesn't generate 500ms trailing dead-air silence before the next paragraph!
-    t = re.sub(r'[\.\,\…\—\-\s]+$', '', t)
+    # Remove trailing periods, commas, ellipses, dashes at paragraph end
+    t = re.sub(r'[\.\,\…\—\-\s\?!]+$', '', t)
+    t = re.sub(r'^[,\.\s\-]+', '', t)
     
-    return t
+    if not re.search(r'[\u0E00-\u0E7Fa-zA-Z0-9]', t):
+        return ""
+        
+    return t.strip()
 
 def get_cache_filename(text: str, voice: str = DEFAULT_VOICE, rate: Optional[str] = None) -> Path:
-    # Use formatted text for the cache key so new natural cadence is recognized
     spoken_text = prepare_text_for_speech(text)
-    key = f"v3::{voice}::{rate or 'default'}::{spoken_text}"
+    key = f"v4::{voice}::{rate or 'default'}::{spoken_text}"
     h = hashlib.sha256(key.encode('utf-8')).hexdigest()
     return CACHE_DIR / f"{h}.mp3"
 
@@ -49,26 +71,37 @@ async def synthesize_text_to_file(
 ) -> bool:
     """Generate audio for a text snippet using Edge-TTS and save to output_path."""
     spoken_text = prepare_text_for_speech(text)
+    
+    # If text has no pronounceable words (e.g. "...", "---", "***"), write silent MP3 pause
     if not spoken_text:
-        return False
+        output_path.write_bytes(SILENT_MP3)
+        return True
         
     temp_path = output_path.with_suffix('.tmp.mp3')
-    try:
-        kwargs = {"voice": voice}
-        if rate and rate not in ["+0%", "0%"]:
-            kwargs["rate"] = rate
-            
-        communicate = edge_tts.Communicate(spoken_text, **kwargs)
-        await communicate.save(str(temp_path))
-        if temp_path.exists() and temp_path.stat().st_size > 0:
-            temp_path.replace(output_path)
-            return True
-        return False
-    except Exception as e:
-        if temp_path.exists():
-            temp_path.unlink()
-        print(f"TTS synthesis error: {e}")
-        raise e
+    
+    async with TTS_SEMAPHORE:
+        for attempt in range(1, 4):
+            try:
+                kwargs = {"voice": voice}
+                if rate and rate not in ["+0%", "0%"]:
+                    kwargs["rate"] = rate
+                    
+                communicate = edge_tts.Communicate(spoken_text, **kwargs)
+                await communicate.save(str(temp_path))
+                if temp_path.exists() and temp_path.stat().st_size > 0:
+                    temp_path.replace(output_path)
+                    return True
+                raise RuntimeError("Empty audio output from Edge-TTS")
+            except Exception as e:
+                if temp_path.exists():
+                    temp_path.unlink()
+                if attempt < 3:
+                    print(f"Edge-TTS attempt {attempt} failed for '{spoken_text[:30]}...': {e}. Retrying in {0.5 * attempt}s...")
+                    await asyncio.sleep(0.5 * attempt)
+                else:
+                    print(f"Edge-TTS failed after 3 attempts: {e}. Falling back to clean silent audio to prevent player freeze.")
+                    output_path.write_bytes(SILENT_MP3)
+                    return True
 
 async def get_or_synthesize_audio(
     text: str,
@@ -78,7 +111,10 @@ async def get_or_synthesize_audio(
     """Return cached audio path if available, or synthesize and cache it."""
     clean_str = text.strip()
     if not clean_str:
-        return None
+        cache_file = CACHE_DIR / "silence_empty.mp3"
+        if not cache_file.exists():
+            cache_file.write_bytes(SILENT_MP3)
+        return cache_file
         
     cache_file = get_cache_filename(clean_str, voice, rate)
     if cache_file.exists() and cache_file.stat().st_size > 0:
