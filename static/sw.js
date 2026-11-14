@@ -1,4 +1,4 @@
-const CACHE_NAME = 'novel-reader-cache-v2';
+const CACHE_NAME = 'novel-reader-cache-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/static/manifest.json',
@@ -8,12 +8,12 @@ const ASSETS_TO_CACHE = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -22,21 +22,32 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       );
-    })
+    }).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  // Don't cache dynamic API requests or audio streams in SW cache
+  // Never intercept API requests or audio streaming endpoints
   if (url.pathname.startsWith('/api/')) {
     return;
   }
   
+  // Network-First strategy: Always fetch latest updates from server when online;
+  // fall back to offline cache if network is unavailable.
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return cachedResponse || fetch(event.request);
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(event.request);
+      })
   );
 });
