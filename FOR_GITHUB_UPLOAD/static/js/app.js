@@ -102,11 +102,16 @@ class NovelReaderApp {
     this.audio = new Audio();
     this.audio.preload = 'auto';
     
-    // In-memory audio Blob cache (pre-downloads next paragraphs in RAM for 0ms latency)
-    this.blobCache = new Map();
-    this.loadingBlobs = new Set();
     this.watchdogTimer = null;
     this.networkInfo = null;
+    this.isTransitioning = false;
+    
+    // Explicit iOS playback session to prevent ambient silence
+    if ('audioSession' in navigator) {
+      try {
+        navigator.audioSession.type = 'playback';
+      } catch (e) {}
+    }
     
     // User preferences
     this.voice = localStorage.getItem('novel_voice') || 'th-TH-PremwadeeNeural';
@@ -533,54 +538,26 @@ class NovelReaderApp {
     return `/api/tts?${params.toString()}`;
   }
 
-  // Preload audio directly into in-memory Blob URL for instantaneous playback
-  async preloadBlob(idx) {
+  // Preload audio into HTTP/ServiceWorker cache for instant playback
+  preloadBlob(idx) {
     if (idx < 0 || idx >= this.paragraphs.length) return;
     const text = this.paragraphs[idx];
     const rawUrl = this.getAudioUrl(text);
-
-    if (this.blobCache.has(rawUrl) || this.loadingBlobs.has(rawUrl)) return;
-    this.loadingBlobs.add(rawUrl);
-
-    try {
-      const res = await fetch(rawUrl);
-      if (res.ok) {
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        this.blobCache.set(rawUrl, blobUrl);
-
-        // Keep blob cache bounded (max 25 blobs to save mobile memory)
-        if (this.blobCache.size > 25) {
-          const oldestKey = this.blobCache.keys().next().value;
-          URL.revokeObjectURL(this.blobCache.get(oldestKey));
-          this.blobCache.delete(oldestKey);
-        }
-      }
-    } catch (e) {
-      console.warn('Blob preload failed, will stream directly', e);
-    } finally {
-      this.loadingBlobs.delete(rawUrl);
-    }
+    fetch(rawUrl).catch(() => {});
   }
 
   clearBlobCache() {
-    for (const bUrl of this.blobCache.values()) {
-      URL.revokeObjectURL(bUrl);
-    }
-    this.blobCache.clear();
-    this.loadingBlobs.clear();
+    // Standard HTTP streaming does not hold memory object URLs
   }
 
   async playCurrentParagraph() {
-    this.advancingParagraph = false;
     if (this.paragraphs.length === 0 || this.currentParagraphIdx >= this.paragraphs.length) {
       this.onChapterEnded();
       return;
     }
 
     const text = this.paragraphs[this.currentParagraphIdx];
-    const rawUrl = this.getAudioUrl(text);
-    const audioSrc = this.blobCache.get(rawUrl) || rawUrl;
+    const audioSrc = this.getAudioUrl(text);
 
     // Reset stall watchdog
     this.resetWatchdog();
@@ -597,7 +574,7 @@ class NovelReaderApp {
       this.updateMediaSession();
       this.saveCurrentBookmark();
 
-      // Preload next paragraph into memory blob
+      // Preload next paragraph into browser cache
       this.preloadBlob(this.currentParagraphIdx + 1);
 
       // Server-side prefetch
@@ -612,31 +589,21 @@ class NovelReaderApp {
     this.clearWatchdog();
     if (!this.isPlaying) return;
 
-    // Retry the current paragraph up to 2 times instead of skipping immediately!
-    if (this.paragraphRetryCount < 2) {
+    // Retry the current paragraph up to 3 times before advancing
+    if (this.paragraphRetryCount < 3) {
       this.paragraphRetryCount++;
       console.log(`Audio stall or error on paragraph ${this.currentParagraphIdx}, retrying (attempt ${this.paragraphRetryCount})...`);
-
-      // Invalidate any bad blob cache entry for this paragraph
-      const text = this.paragraphs[this.currentParagraphIdx];
-      if (text) {
-        const rawUrl = this.getAudioUrl(text);
-        if (this.blobCache.has(rawUrl)) {
-          URL.revokeObjectURL(this.blobCache.get(rawUrl));
-          this.blobCache.delete(rawUrl);
-        }
-      }
 
       setTimeout(() => {
         if (this.isPlaying) {
           this.playCurrentParagraph();
         }
-      }, 1000);
+      }, 800);
       return;
     }
 
-    // Only skip after 2 failed retries to avoid getting permanently stuck
-    console.warn(`Paragraph ${this.currentParagraphIdx} failed after 2 retries. Moving to next paragraph.`);
+    // Only skip after 3 failed retries
+    console.warn(`Paragraph ${this.currentParagraphIdx} failed after 3 retries. Moving to next paragraph.`);
     this.paragraphRetryCount = 0;
     this.handleAudioEnded();
   }
@@ -646,10 +613,22 @@ class NovelReaderApp {
     this.paragraphRetryCount = 0;
     if (!this.isPlaying) return;
 
+    // Strict transition guard: prevent race conditions and duplicate skips
+    if (this.isTransitioning) return;
+    this.isTransitioning = true;
+
     if (this.currentParagraphIdx + 1 < this.paragraphs.length) {
       this.currentParagraphIdx++;
-      this.playCurrentParagraph();
+      const p = this.playCurrentParagraph();
+      if (p && typeof p.finally === 'function') {
+        p.finally(() => {
+          this.isTransitioning = false;
+        });
+      } else {
+        this.isTransitioning = false;
+      }
     } else {
+      this.isTransitioning = false;
       this.onChapterEnded();
     }
   }
@@ -739,9 +718,7 @@ class NovelReaderApp {
 
   setupAudioEvents() {
     this.audio.addEventListener('ended', () => {
-      if (!this.advancingParagraph) {
-        this.handleAudioEnded();
-      }
+      this.handleAudioEnded();
     });
 
     this.audio.addEventListener('playing', () => {
@@ -766,17 +743,6 @@ class NovelReaderApp {
         const paraBase = (this.currentParagraphIdx / this.paragraphs.length) * 100;
         const paraProgress = (this.audio.currentTime / this.audio.duration) * (100 / this.paragraphs.length);
         this.playerProgressBar.style.width = `${paraBase + paraProgress}%`;
-
-        // Seamless gap elimination: cut out trailing silence buffer (~180ms) for snappy paragraph transition
-        const remaining = this.audio.duration - this.audio.currentTime;
-        if (!this.advancingParagraph && remaining > 0 && remaining <= 0.18 && this.currentParagraphIdx + 1 < this.paragraphs.length) {
-          const nextText = this.paragraphs[this.currentParagraphIdx + 1];
-          const nextRawUrl = this.getAudioUrl(nextText);
-          if (this.blobCache.has(nextRawUrl)) {
-            this.advancingParagraph = true;
-            this.handleAudioEnded();
-          }
-        }
       }
     });
   }

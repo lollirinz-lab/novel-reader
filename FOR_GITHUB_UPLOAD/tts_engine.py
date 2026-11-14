@@ -15,8 +15,8 @@ DEFAULT_VOICE = "th-TH-PremwadeeNeural"
 SILENT_FRAME = b'\xff\xfb\x90\x64' + b'\x00' * 413
 SILENT_MP3 = SILENT_FRAME * 30
 
-# Concurrency semaphore to prevent Edge-TTS WebSocket drops
-TTS_SEMAPHORE = asyncio.Semaphore(2)
+# Concurrency semaphore to allow snappy multi-paragraph TTS
+TTS_SEMAPHORE = asyncio.Semaphore(5)
 
 def prepare_text_for_speech(text: str) -> str:
     """
@@ -99,9 +99,8 @@ async def synthesize_text_to_file(
                     print(f"Edge-TTS attempt {attempt} failed for '{spoken_text[:30]}...': {e}. Retrying in {0.5 * attempt}s...")
                     await asyncio.sleep(0.5 * attempt)
                 else:
-                    print(f"Edge-TTS failed after 3 attempts: {e}. Falling back to clean silent audio to prevent player freeze.")
-                    output_path.write_bytes(SILENT_MP3)
-                    return True
+                    print(f"Edge-TTS failed after 3 attempts: {e}.")
+                    return False
 
 async def get_or_synthesize_audio(
     text: str,

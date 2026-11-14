@@ -374,7 +374,7 @@ class PrefetchRequest(BaseModel):
 async def prefetch_tts(req: PrefetchRequest, background_tasks: BackgroundTasks):
     """Background task to pre-generate audio for next upcoming paragraphs."""
     async def run_prefetch():
-        for p in req.paragraphs[:5]:  # prefetch next 5 paragraphs
+        for p in req.paragraphs[:2]:  # prefetch next 2 paragraphs only
             if p and p.strip():
                 try:
                     await get_or_synthesize_audio(p, voice=req.voice or DEFAULT_VOICE, rate=req.rate)
@@ -382,7 +382,7 @@ async def prefetch_tts(req: PrefetchRequest, background_tasks: BackgroundTasks):
                     print(f"Prefetch failed for paragraph: {e}")
                     
     background_tasks.add_task(run_prefetch)
-    return {"status": "prefetching", "count": min(len(req.paragraphs), 5)}
+    return {"status": "prefetching", "count": min(len(req.paragraphs), 2)}
 
 @app.get("/api/cache/stats")
 async def get_cache_stats():
