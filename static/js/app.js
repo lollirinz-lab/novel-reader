@@ -660,12 +660,17 @@ class NovelReaderApp {
 
   async playCurrentParagraph() {
     if (this.paragraphs.length === 0 || this.currentParagraphIdx >= this.paragraphs.length) {
+      this.setPlayLoading(false);
       this.onChapterEnded();
       return;
     }
 
     const text = this.paragraphs[this.currentParagraphIdx];
     const audioSrc = this.getAudioUrl(text);
+
+    // Show loading spinner immediately on play button
+    this.setPlayLoading(true);
+    this.highlightActiveParagraph();
 
     // Reset stall watchdog
     this.resetWatchdog();
@@ -677,8 +682,8 @@ class NovelReaderApp {
       await this.audio.play();
       this.isPlaying = true;
       this.paragraphRetryCount = 0; // Successfully playing, reset retry count
+      this.setPlayLoading(false);
       this.updatePlayBtnState();
-      this.highlightActiveParagraph();
       this.updateMediaSession();
       this.saveCurrentBookmark();
 
@@ -691,6 +696,7 @@ class NovelReaderApp {
       }, 2500);
     } catch (e) {
       console.warn('Playback error or autoplay blocked on paragraph', this.currentParagraphIdx, e);
+      this.setPlayLoading(false);
       this.handlePlaybackFailure();
     }
   }
@@ -786,13 +792,16 @@ class NovelReaderApp {
       this.audio.pause();
       this.isPlaying = false;
       this.clearWatchdog();
+      this.setPlayLoading(false);
       this.updatePlayBtnState();
     } else {
       if (!this.audio.src || this.audio.src === '' || this.audio.ended) {
         this.playCurrentParagraph();
       } else {
+        this.setPlayLoading(true);
         this.audio.play().then(() => {
           this.isPlaying = true;
+          this.setPlayLoading(false);
           this.updatePlayBtnState();
           this.preloadBlob(this.currentParagraphIdx + 1);
         }).catch(err => {
@@ -802,7 +811,17 @@ class NovelReaderApp {
     }
   }
 
+  setPlayLoading(isLoading) {
+    if (!this.btnPlayIcon) return;
+    if (isLoading) {
+      this.btnPlayIcon.innerHTML = '<span class="spinner" style="width: 18px; height: 18px; border: 2.5px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; display: inline-block;"></span>';
+    } else {
+      this.updatePlayBtnState();
+    }
+  }
+
   updatePlayBtnState() {
+    if (!this.btnPlayIcon) return;
     if (this.isPlaying) {
       this.btnPlayIcon.textContent = '⏸';
     } else {
@@ -817,9 +836,13 @@ class NovelReaderApp {
 
     this.audio.addEventListener('playing', () => {
       this.clearWatchdog();
+      this.isPlaying = true;
+      this.setPlayLoading(false);
+      this.updatePlayBtnState();
     });
 
     this.audio.addEventListener('waiting', () => {
+      this.setPlayLoading(true);
       this.resetWatchdog();
     });
 
