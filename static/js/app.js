@@ -169,7 +169,9 @@ class NovelReaderApp {
 
     // Player Elements
     this.bottomPlayer = document.getElementById('bottom-player');
+    this.playerTrackInfoBtn = document.getElementById('player-track-info-btn');
     this.playerTrackTitle = document.getElementById('player-track-title');
+    this.playerTrackTitleText = document.getElementById('player-track-title-text');
     this.playerTrackSubtitle = document.getElementById('player-track-subtitle');
     this.playerProgressBar = document.getElementById('player-progress-bar');
     this.playerProgressContainer = document.getElementById('player-progress-container');
@@ -177,6 +179,7 @@ class NovelReaderApp {
     this.btnPlayIcon = document.getElementById('btn-play-icon');
     this.btnRewind = document.getElementById('btn-rewind');
     this.btnForward = document.getElementById('btn-forward');
+    this.btnPlayerNextCh = document.getElementById('btn-player-next-ch');
     this.btnSpeed = document.getElementById('btn-speed');
     this.btnTimer = document.getElementById('btn-timer');
 
@@ -406,16 +409,72 @@ class NovelReaderApp {
     }
   }
 
+  getReadChapters(novelId) {
+    if (!novelId) return new Set();
+    try {
+      const key = `novel_read_chapters_${novelId}`;
+      const raw = localStorage.getItem(key);
+      let list = raw ? JSON.parse(raw) : [];
+
+      // Auto-include chapters before current bookmarked chapter
+      const bookmarks = JSON.parse(localStorage.getItem('novel_bookmarks') || '{}');
+      const bm = bookmarks[novelId];
+      if (bm && bm.chapter_id) {
+        const bmChapterId = parseInt(bm.chapter_id);
+        for (let i = 1; i < bmChapterId; i++) {
+          if (!list.includes(i)) list.push(i);
+        }
+      }
+      return new Set(list.map(Number));
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  markChapterAsRead(novelId, chapterId) {
+    if (!novelId || !chapterId) return;
+    try {
+      const chId = parseInt(chapterId);
+      const readSet = this.getReadChapters(novelId);
+      if (!readSet.has(chId)) {
+        readSet.add(chId);
+        localStorage.setItem(`novel_read_chapters_${novelId}`, JSON.stringify(Array.from(readSet)));
+        this.renderChapterSelect();
+      }
+    } catch (e) {
+      console.error('Error marking chapter as read:', e);
+    }
+  }
+
+  toggleChapterRead(novelId, chapterId) {
+    if (!novelId || !chapterId) return;
+    try {
+      const chId = parseInt(chapterId);
+      const readSet = this.getReadChapters(novelId);
+      if (readSet.has(chId)) {
+        readSet.delete(chId);
+      } else {
+        readSet.add(chId);
+      }
+      localStorage.setItem(`novel_read_chapters_${novelId}`, JSON.stringify(Array.from(readSet)));
+      this.renderChapterSelect();
+    } catch (e) {
+      console.error('Error toggling chapter read:', e);
+    }
+  }
+
   renderChapterSelect() {
     if (!this.readerChapterSelect || !this.currentNovel || !this.currentNovel.chapters) return;
     this.readerChapterSelect.innerHTML = '';
     const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    const readChapters = this.getReadChapters(this.currentNovel.id);
 
     this.currentNovel.chapters.forEach(ch => {
       const opt = document.createElement('option');
       const chId = parseInt(ch.chapter_id || ch.id);
       opt.value = chId;
-      opt.textContent = ch.title || `ตอนที่ ${chId}`;
+      const isRead = readChapters.has(chId);
+      opt.textContent = `${isRead ? '✓ ' : ''}${ch.title || `ตอนที่ ${chId}`}`;
       if (chId === currentId) {
         opt.selected = true;
       }
@@ -505,6 +564,39 @@ class NovelReaderApp {
 
       this.readerContentBox.appendChild(pElem);
     });
+
+    // Render Chapter End Navigation block
+    const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    const hasNext = !!this.findNextChapter(currentId);
+    const hasPrev = !!this.findPrevChapter(currentId);
+    const totalChapters = (this.currentNovel && this.currentNovel.chapters) ? this.currentNovel.chapters.length : currentId;
+
+    const navCard = document.createElement('div');
+    navCard.className = 'chapter-end-nav';
+    navCard.innerHTML = `
+      <div class="chapter-end-nav-title">จบตอนที่ ${currentId} แล้วค่ะ 🎉</div>
+      <div class="chapter-end-nav-buttons">
+        <button id="btn-end-prev" class="btn-chapter-nav" ${!hasPrev ? 'disabled' : ''}>⏮ ตอนก่อนหน้า</button>
+        <button id="btn-end-chapters" class="btn-chapter-nav btn-chapter-nav-toc">📑 สารบัญ (${currentId}/${totalChapters})</button>
+        <button id="btn-end-next" class="btn-chapter-nav btn-chapter-nav-primary" ${!hasNext ? 'disabled' : ''}>ตอนต่อไป ⏭</button>
+      </div>
+    `;
+
+    const btnPrev = navCard.querySelector('#btn-end-prev');
+    const btnToc = navCard.querySelector('#btn-end-chapters');
+    const btnNext = navCard.querySelector('#btn-end-next');
+
+    if (btnPrev && hasPrev) {
+      btnPrev.addEventListener('click', () => this.goToPrevChapter());
+    }
+    if (btnToc) {
+      btnToc.addEventListener('click', () => this.openChaptersModal());
+    }
+    if (btnNext && hasNext) {
+      btnNext.addEventListener('click', () => this.goToNextChapter());
+    }
+
+    this.readerContentBox.appendChild(navCard);
   }
 
   jumpToParagraph(idx) {
@@ -529,6 +621,14 @@ class NovelReaderApp {
     if (this.paragraphs.length > 0) {
       const pct = ((this.currentParagraphIdx + 1) / this.paragraphs.length) * 100;
       this.playerProgressBar.style.width = `${pct}%`;
+
+      // Auto mark chapter as read if reached last paragraph or >= 85%
+      if (pct >= 85 || this.currentParagraphIdx >= this.paragraphs.length - 1) {
+        const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+        if (this.currentNovel) {
+          this.markChapterAsRead(this.currentNovel.id, currentId);
+        }
+      }
     }
   }
 
@@ -737,13 +837,17 @@ class NovelReaderApp {
 
   onChapterEnded() {
     this.clearWatchdog();
+    const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    if (this.currentNovel) {
+      this.markChapterAsRead(this.currentNovel.id, currentId);
+    }
+
     if (this.sleepTimer === 'chapter') {
       this.stopPlayback('ครบตามเวลาที่ตั้งไว้ (จบตอน)');
       return;
     }
 
     // Auto next chapter
-    const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
     const nextChapter = this.findNextChapter(currentId);
     if (nextChapter) {
       const nextId = nextChapter.chapter_id || nextChapter.id;
@@ -780,9 +884,39 @@ class NovelReaderApp {
     return null;
   }
 
+  goToNextChapter() {
+    const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    const next = this.findNextChapter(currentId);
+    if (next) {
+      const nextId = next.chapter_id || next.id;
+      if (this.currentNovel) {
+        this.markChapterAsRead(this.currentNovel.id, currentId);
+      }
+      this.loadChapter(nextId, 0).then(() => {
+        this.playCurrentParagraph();
+      });
+    }
+  }
+
+  goToPrevChapter() {
+    const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    const prev = this.findPrevChapter(currentId);
+    if (prev) {
+      const prevId = prev.chapter_id || prev.id;
+      this.loadChapter(prevId, 0).then(() => {
+        this.playCurrentParagraph();
+      });
+    }
+  }
+
   updatePlayerInfo() {
     if (!this.currentNovel || !this.currentChapter) return;
-    this.playerTrackTitle.textContent = this.currentChapter.title || 'นิยายเสียง';
+    const title = this.currentChapter.title || 'นิยายเสียง';
+    if (this.playerTrackTitleText) {
+      this.playerTrackTitleText.textContent = title;
+    } else if (this.playerTrackTitle) {
+      this.playerTrackTitle.textContent = title;
+    }
     this.playerTrackSubtitle.textContent = this.currentNovel.title;
   }
 
@@ -981,15 +1115,45 @@ class NovelReaderApp {
     if (!this.currentNovel || !this.currentNovel.chapters) return;
     this.chapterListContainer.innerHTML = '';
     const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    const readChapters = this.getReadChapters(this.currentNovel.id);
 
     this.currentNovel.chapters.forEach(ch => {
       const chId = parseInt(ch.chapter_id || ch.id);
+      const isCurrent = (chId === currentId);
+      const isRead = readChapters.has(chId);
+
       const item = document.createElement('div');
-      item.className = 'chapter-list-item' + (chId === currentId ? ' active' : '');
+      item.className = 'chapter-list-item' + (isCurrent ? ' active' : '') + (isRead ? ' is-read' : '');
+      
+      let badgeHtml = '';
+      if (isCurrent) {
+        badgeHtml = '<span class="ch-badge-active">🎧 กำลังฟัง</span>';
+      } else if (isRead) {
+        badgeHtml = '<span class="ch-badge-read">✓ อ่านแล้ว</span>';
+      }
+
       item.innerHTML = `
-        <span style="font-weight: ${chId === currentId ? '700' : '500'};">${ch.title || ('ตอนที่ ' + chId)}</span>
-        ${chId === currentId ? '<span style="color: var(--primary); font-weight: 700;">🎧 กำลังฟัง</span>' : ''}
+        <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+          <span class="ch-check-icon ${isRead ? 'checked' : ''}" title="${isRead ? 'อ่านแล้ว (แตะเพื่อเปลี่ยนเป็นยังไม่อ่าน)' : 'ยังไม่อ่าน (แตะเพื่อทำเครื่องหมายว่าอ่านแล้ว)'}">
+            ${isRead ? '✓' : ''}
+          </span>
+          <span style="font-weight: ${isCurrent ? '700' : (isRead ? '500' : '400')}; color: ${isRead && !isCurrent ? 'var(--text-muted)' : 'var(--text-main)'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${ch.title || ('ตอนที่ ' + chId)}
+          </span>
+        </div>
+        ${badgeHtml}
       `;
+
+      // Allow tapping the checkmark to toggle read status
+      const checkIcon = item.querySelector('.ch-check-icon');
+      if (checkIcon) {
+        checkIcon.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.toggleChapterRead(this.currentNovel.id, chId);
+          this.openChaptersModal();
+        });
+      }
+
       item.addEventListener('click', () => {
         this.closeAllModals();
         this.loadChapter(chId, 0).then(() => {
@@ -1000,6 +1164,14 @@ class NovelReaderApp {
     });
 
     this.showModal(this.modalChapters);
+
+    // Auto scroll to current active chapter in the list
+    setTimeout(() => {
+      const activeEl = this.chapterListContainer.querySelector('.chapter-list-item.active');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 80);
   }
 
   showModal(modalElem) {
@@ -1122,27 +1294,15 @@ class NovelReaderApp {
     });
 
     // Chapter Prev/Next buttons
-    this.btnPrevChapter.addEventListener('click', () => {
-      const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
-      const prev = this.findPrevChapter(currentId);
-      if (prev) {
-        const prevId = prev.chapter_id || prev.id;
-        this.loadChapter(prevId, 0).then(() => {
-          this.playCurrentParagraph();
-        });
-      }
-    });
+    this.btnPrevChapter.addEventListener('click', () => this.goToPrevChapter());
+    this.btnNextChapter.addEventListener('click', () => this.goToNextChapter());
 
-    this.btnNextChapter.addEventListener('click', () => {
-      const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
-      const next = this.findNextChapter(currentId);
-      if (next) {
-        const nextId = next.chapter_id || next.id;
-        this.loadChapter(nextId, 0).then(() => {
-          this.playCurrentParagraph();
-        });
-      }
-    });
+    if (this.btnPlayerNextCh) {
+      this.btnPlayerNextCh.addEventListener('click', () => this.goToNextChapter());
+    }
+    if (this.playerTrackInfoBtn) {
+      this.playerTrackInfoBtn.addEventListener('click', () => this.openChaptersModal());
+    }
 
     // Chapter Dropdown Selector in Reader View
     if (this.readerChapterSelect) {

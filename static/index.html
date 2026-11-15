@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="/static/icons/icon.svg">
   <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
 
-  <link rel="stylesheet" href="/static/css/style.css?v=8">
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
 </head>
 <body class="theme-sepia">
 
@@ -131,9 +131,12 @@
     </div>
 
     <div class="player-main-row">
-      <div class="player-info">
+      <div class="player-info" id="player-track-info-btn" style="cursor: pointer;" title="แตะเพื่อเปิดสารบัญตอน">
         <div class="player-track-details">
-          <div id="player-track-title" class="track-title">พร้อมเล่นนิยาย</div>
+          <div id="player-track-title" class="track-title" style="display: flex; align-items: center; gap: 4px;">
+            <span id="player-track-title-text">พร้อมเล่นนิยาย</span>
+            <span class="player-ch-badge">📑 ตอน</span>
+          </div>
           <div id="player-track-subtitle" class="track-subtitle">เสียงคุณเปรมวดี (นุ่มนวล ลื่นหู)</div>
         </div>
       </div>
@@ -147,6 +150,10 @@
       </div>
 
       <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="btn-player-next-ch" class="player-options-btn" title="ข้ามไปตอนถัดไป" style="font-weight: 700; color: var(--primary);">
+          <span class="btn-text-full">ตอนถัดไป ⏭</span>
+          <span class="btn-text-short">⏭ ตอน</span>
+        </button>
         <button id="btn-speed" class="player-options-btn" title="ปรับความเร็วเสียงอ่าน">1.0x</button>
         <button id="btn-timer" class="player-options-btn" title="ตั้งเวลาปิด">⏱</button>
       </div>
@@ -283,6 +290,6 @@
 
   </div>
 
-  <script src="/static/js/app.js?v=8"></script>
+  <script src="/static/js/app.js?v=9"></script>
 </body>
 </html>
