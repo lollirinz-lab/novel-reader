@@ -1021,4 +1021,24 @@ body {
     line-height: 1.75;
     padding: 8px 10px;
   }
+  .player-buttons {
+    gap: 4px;
+  }
+  .btn-player {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+  }
+  .btn-play-large {
+    width: 42px;
+    height: 42px;
+    font-size: 1.15rem;
+  }
+  .player-options-btn {
+    padding: 5px 8px;
+    font-size: 0.78rem;
+  }
+  .header-actions {
+    gap: 4px;
+  }
 }

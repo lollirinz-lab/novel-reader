@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="/static/icons/icon.svg">
   <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
 
-  <link rel="stylesheet" href="/static/css/style.css?v=9">
+  <link rel="stylesheet" href="/static/css/style.css?v=10">
 </head>
 <body class="theme-sepia">
 
@@ -34,8 +34,14 @@
     </div>
 
     <div class="header-actions">
+      <button id="btn-header-prev-ch" class="btn-icon" style="display: none;" title="ตอนก่อนหน้า (⏮)">
+        ⏮
+      </button>
       <button id="btn-chapters" class="btn-icon" style="display: none;" title="สารบัญตอน">
         📑
+      </button>
+      <button id="btn-header-next-ch" class="btn-icon" style="display: none;" title="ตอนถัดไป (⏭)">
+        ⏭
       </button>
       <button id="btn-mobile" class="btn-pill" title="เปิดบน iPhone/Android">
         📱 บนมือถือ
@@ -142,18 +148,16 @@
       </div>
 
       <div class="player-buttons">
+        <button id="btn-player-prev-ch" class="btn-player" title="ตอนก่อนหน้า (⏮)">⏮</button>
         <button id="btn-rewind" class="btn-player" title="ย้อน 15 วินาที / ย่อหน้าก่อน">⏪</button>
         <button id="btn-play" class="btn-play-large" title="เล่น / หยุด">
           <span id="btn-play-icon">▶</span>
         </button>
         <button id="btn-forward" class="btn-player" title="ไปข้างหน้า 15 วินาที / ย่อหน้าถัดไป">⏩</button>
+        <button id="btn-player-next-ch" class="btn-player" title="ตอนถัดไป (⏭)">⏭</button>
       </div>
 
       <div style="display: flex; align-items: center; gap: 6px;">
-        <button id="btn-player-next-ch" class="player-options-btn" title="ข้ามไปตอนถัดไป" style="font-weight: 700; color: var(--primary);">
-          <span class="btn-text-full">ตอนถัดไป ⏭</span>
-          <span class="btn-text-short">⏭ ตอน</span>
-        </button>
         <button id="btn-speed" class="player-options-btn" title="ปรับความเร็วเสียงอ่าน">1.0x</button>
         <button id="btn-timer" class="player-options-btn" title="ตั้งเวลาปิด">⏱</button>
       </div>
@@ -290,6 +294,6 @@
 
   </div>
 
-  <script src="/static/js/app.js?v=9"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>

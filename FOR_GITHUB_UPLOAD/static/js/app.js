@@ -153,7 +153,9 @@ class NovelReaderApp {
     this.btnBack = document.getElementById('btn-back');
     this.btnMobile = document.getElementById('btn-mobile');
     this.btnSettings = document.getElementById('btn-settings');
+    this.btnHeaderPrevCh = document.getElementById('btn-header-prev-ch');
     this.btnChapters = document.getElementById('btn-chapters');
+    this.btnHeaderNextCh = document.getElementById('btn-header-next-ch');
     this.fileUploadInput = document.getElementById('file-upload-input');
     this.uploadCard = document.getElementById('upload-card');
     this.novelGrid = document.getElementById('novel-grid');
@@ -177,6 +179,7 @@ class NovelReaderApp {
     this.playerProgressContainer = document.getElementById('player-progress-container');
     this.btnPlay = document.getElementById('btn-play');
     this.btnPlayIcon = document.getElementById('btn-play-icon');
+    this.btnPlayerPrevCh = document.getElementById('btn-player-prev-ch');
     this.btnRewind = document.getElementById('btn-rewind');
     this.btnForward = document.getElementById('btn-forward');
     this.btnPlayerNextCh = document.getElementById('btn-player-next-ch');
@@ -394,6 +397,8 @@ class NovelReaderApp {
       this.viewReader.classList.add('active');
       this.btnBack.style.display = 'flex';
       this.btnChapters.style.display = 'flex';
+      if (this.btnHeaderPrevCh) this.btnHeaderPrevCh.style.display = 'flex';
+      if (this.btnHeaderNextCh) this.btnHeaderNextCh.style.display = 'flex';
 
       this.readerNovelTitle.textContent = this.currentNovel.title;
 
@@ -520,6 +525,7 @@ class NovelReaderApp {
       this.renderChapterSelect();
       this.renderParagraphs();
       this.updatePlayerInfo();
+      this.updateChapterNavButtons();
 
       // Highlight active paragraph and scroll into view immediately
       this.highlightActiveParagraph();
@@ -909,6 +915,28 @@ class NovelReaderApp {
     }
   }
 
+  updateChapterNavButtons() {
+    const currentId = parseInt(this.currentChapter ? (this.currentChapter.chapter_id || this.currentChapter.id) : 1);
+    const hasNext = !!this.findNextChapter(currentId);
+    const hasPrev = !!this.findPrevChapter(currentId);
+
+    const prevButtons = [this.btnPrevChapter, this.btnHeaderPrevCh, this.btnPlayerPrevCh];
+    prevButtons.forEach(btn => {
+      if (btn) {
+        btn.disabled = !hasPrev;
+        btn.style.opacity = hasPrev ? '1' : '0.35';
+      }
+    });
+
+    const nextButtons = [this.btnNextChapter, this.btnHeaderNextCh, this.btnPlayerNextCh];
+    nextButtons.forEach(btn => {
+      if (btn) {
+        btn.disabled = !hasNext;
+        btn.style.opacity = hasNext ? '1' : '0.35';
+      }
+    });
+  }
+
   updatePlayerInfo() {
     if (!this.currentNovel || !this.currentChapter) return;
     const title = this.currentChapter.title || 'นิยายเสียง';
@@ -1237,6 +1265,8 @@ class NovelReaderApp {
       this.viewLibrary.classList.add('active');
       this.btnBack.style.display = 'none';
       this.btnChapters.style.display = 'none';
+      if (this.btnHeaderPrevCh) this.btnHeaderPrevCh.style.display = 'none';
+      if (this.btnHeaderNextCh) this.btnHeaderNextCh.style.display = 'none';
       this.loadLibrary(); // refresh bookmarks
     });
 
@@ -1297,6 +1327,15 @@ class NovelReaderApp {
     this.btnPrevChapter.addEventListener('click', () => this.goToPrevChapter());
     this.btnNextChapter.addEventListener('click', () => this.goToNextChapter());
 
+    if (this.btnHeaderPrevCh) {
+      this.btnHeaderPrevCh.addEventListener('click', () => this.goToPrevChapter());
+    }
+    if (this.btnHeaderNextCh) {
+      this.btnHeaderNextCh.addEventListener('click', () => this.goToNextChapter());
+    }
+    if (this.btnPlayerPrevCh) {
+      this.btnPlayerPrevCh.addEventListener('click', () => this.goToPrevChapter());
+    }
     if (this.btnPlayerNextCh) {
       this.btnPlayerNextCh.addEventListener('click', () => this.goToNextChapter());
     }
